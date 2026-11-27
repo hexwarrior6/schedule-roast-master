@@ -2,7 +2,7 @@ import {describe,it,expect} from "vitest";
 import {assess,planCrops,localEvidence} from "./round51";
 import type {OCR,Topology} from "./round5-types";
 import type {Layout} from "./round4-types";
-const line=(text:string,x:number,y:number)=>({text,score:.99,box:[[x-5,y-4],[x+5,y-4],[x+5,y+4],[x-5,y+4]]});
+const line=(text:string,x:number,y:number):OCR["lines"][number]=>({text,score:.99,box:[[x-5,y-4],[x+5,y-4],[x+5,y+4],[x-5,y+4]]});
 const o:OCR={engine:"test",width:600,height:400,warm:true,loadMs:0,ocrMs:1,totalMs:1,lines:[...["周一","周二","周三","周四","周五"].map((s,i)=>line(s,100+i*100,30)),line("高等数学",100,90),...Array.from({length:4},(_,i)=>line(String(i+1),20,70+i*50))],grid:{status:"unresolved",regions:[],cells:[]}};
 const l:Layout={version:1,kind:"grid",axis:{orientation:"columns",headers:[],cross:30,step:100},regions:Array.from({length:5},(_,i)=>({day:i+1,bounds:[50+i*100,50,150+i*100,350],source:"grid",reliable:true})),ticks:[],blocks:[],listHeaders:{},unassignedLineIds:[],layoutMs:1};
 const source={status:"ok" as const,source:"cv",cells:[{id:"G0",bounds:[50,50,150,150] as [number,number,number,number],day:1,periods:[1,2],logical:null,source:"local_edges",quality:.9,lineIds:[5],text:"高等数学"}],ticks:Array.from({length:4},(_,i)=>({period:i+1,position:70+i*50,lineId:i+6})),elapsedMs:1};
