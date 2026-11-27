@@ -116,16 +116,19 @@ export function summarizeTimetable(schedule:CanonicalSchedule){
   const coverageComplete=coverage.every(d=>d.visibility==="shown");
   const complete=kind==="personal"&&coverageComplete&&unknown.length===0&&schedule.unscheduled.length===0&&termWeeks!==null;
   const visibleDays=coverage.map(d=>({day:d.day,visibility:d.visibility,records:d.count}));
+  const practice=schedule.unscheduled.map(c=>({...c,weekNumbers:parseWeekNumbers(c.weeks,termWeeks)}));
   const weekly=weeks.map(week=>{
+    const unscheduledCount=practice.filter(c=>c.weekNumbers?.includes(week)).length;
+    const unknownUnscheduledCount=practice.filter(c=>c.weekNumbers===null).length;
     const active=known.filter(c=>c.weekNumbers?.includes(week));
     const days=visibleDays.map(d=>{
       const records=active.filter(c=>c.day===d.day);
       const unknownWeekRecords=unknown.filter(c=>c.day===d.day).length;
       const m=dayMetrics(records);
       return {day:d.day,visibility:d.visibility,unknownWeekRecords,...m,
-        confirmedNoClass:kind==="personal"&&d.visibility==="shown"&&unknownWeekRecords===0&&schedule.unscheduled.length===0&&records.length===0};
+        confirmedNoClass:kind==="personal"&&d.visibility==="shown"&&unknownWeekRecords===0&&unscheduledCount===0&&unknownUnscheduledCount===0&&records.length===0};
     });
-    return {week,knownOccurrences:active.length,knownActiveDays:days.filter(d=>d.occurrences>0).length,
+    return {week,unscheduledCount,unknownUnscheduledCount,unknownWeekRecords:unknown.length,knownOccurrences:active.length,knownActiveDays:days.filter(d=>d.occurrences>0).length,
       knownOccupiedPeriods:days.reduce((n,d)=>n+d.knownOccupiedPeriods,0),
       unknownPeriodRecords:days.reduce((n,d)=>n+d.unknownPeriodRecords,0),
       days};

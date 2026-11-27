@@ -19,5 +19,7 @@ export async function prepareVisionImages(bytes:Uint8Array){
     const tile=await sharp(data).extract(bounds).resize({width:1200,height:1200,fit:"inside"}).sharpen({sigma:0.6}).png().toBuffer();
     return {label:labels[i],url:"data:image/png;base64,"+tile.toString("base64")};
   }));
-  return {width,height,crops,full:"data:image/png;base64,"+data.toString("base64")};
+  const footerHeight=Math.max(1,Math.ceil(height*0.18));
+  const footer=await sharp(data).extract({left:0,top:height-footerHeight,width,height:footerHeight}).resize({width:2000,height:1000,fit:"inside"}).sharpen({sigma:0.6}).png().toBuffer();
+  return {width,height,crops,footer:"data:image/png;base64,"+footer.toString("base64"),full:"data:image/png;base64,"+data.toString("base64")};
 }

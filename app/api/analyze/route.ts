@@ -4,8 +4,8 @@ import { timingSafeEqual } from "node:crypto";
 import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
 import { reviewResultSchema } from "@/lib/schema";
 import { parseExtraction } from "@/lib/normalize-extraction";
-import { analyzeCourses } from "@/lib/analyzer";
-import {buildTimetable,summarizeTimetable} from "@/lib/timetable";
+import {buildTimetable} from "@/lib/timetable";
+import {scoreTimetable} from "@/lib/score";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
 import { resolveAIConfig, completionLimit, providerOptions } from "@/lib/ai-config";
@@ -75,6 +75,8 @@ export async function POST(request: Request) {
             {type:"text" as const,text:"同一课表的"+crop.label+"局部放大图（与其他区域有重叠）。"},
             {type:"image_url" as const,image_url:{url:crop.url,detail:"high" as const}},
           ]),
+          {type:"text",text:"页底放大图：只用于核对表格底部实践课程、备注和学期总周数，不重复计算普通课程。"},
+          {type:"image_url",image_url:{url:images.footer,detail:"high"}},
         ]},
       ],
       ...completionLimit(vision,10000),
@@ -103,13 +105,13 @@ export async function POST(request: Request) {
       extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
     }
     const schedule=buildTimetable(extraction);
-    const facts=summarizeTimetable(schedule);
+    const facts=scoreTimetable(schedule);
     stage="文本评价";
     const reviewCompletion=await reviewClient.chat.completions.create({
       model:reviewConfig.model,
       messages:[
         {role:"system",content:SCHEDULE_REVIEW},
-        {role:"user",content:JSON.stringify({schedule,facts,stats:analyzeCourses(extraction.courses)})},
+        {role:"user",content:JSON.stringify({facts})},
       ],
       ...completionLimit(reviewConfig,6500),
       ...providerOptions(reviewConfig),
@@ -118,13 +120,13 @@ export async function POST(request: Request) {
     const reason=reviewCompletion.choices?.[0]?.finish_reason;
     if(!reviewRaw||reason==="length"||reason==="content_filter"||String(reason)==="error"){
       console.warn("AI completion incomplete",{stage,model:reviewConfig.model,finishReason:reason,hasContent:Boolean(reviewRaw),choiceCount:reviewCompletion.choices?.length??0,completionTokens:reviewCompletion.usage?.completion_tokens,reasoningTokens:reviewCompletion.usage?.completion_tokens_details?.reasoning_tokens});
-      return fail(reason==="length"?"文本评价达到 Token 上限，请重试。":"课表已识别，但评价模型未返回完整答案，请重试。",502);
+      return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
     }
     let reviewJson:unknown;
     try{reviewJson=JSON.parse(reviewRaw.replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,"").trim());}
-    catch{return fail("评价格式异常，请重试。",502);}
+    catch{return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});}
     const review=reviewResultSchema.safeParse(reviewJson);
-    if(!review.success)return fail("模型评价不完整，请重试。",502);
+    if(!review.success){console.warn("AI review schema invalid",{model:reviewConfig.model});return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});}
     return NextResponse.json(buildReport(extraction,review.data,schedule),{headers:{"Cache-Control":"no-store"}});
   } catch (error) {
     if (error instanceof OpenAI.APIError && error.status === 429) return fail(stage+"模型繁忙或免费额度不足，请稍后重试。",503);

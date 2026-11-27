@@ -81,7 +81,7 @@ export function normalizeExtraction(input:unknown):unknown {
   if(incomplete)warnings.unshift("部分识别字段不完整，以下结果仅为可确认记录，请核对原图。");
   const kind=root.kind==="personal"||root.kind==="catalog"?root.kind:"uncertain";
   const confidence=incomplete?"low":root.confidence==="high"||root.confidence==="medium"||root.confidence==="low"?root.confidence:"medium";
-  const unscheduled=Array.isArray(root.unscheduled)?root.unscheduled.slice(0,50).flatMap(entry=>{const row=object(entry);if(!row)return [];const name=optionalText(cleanCourseFields(row,termWeeks).name,100);return name?[{name,weeks:optionalText(row.weeks,120)}]:[];}):[];
+  const unscheduled=Array.isArray(root.unscheduled)?root.unscheduled.slice(0,50).flatMap(entry=>{const row=object(entry);if(!row)return [];const raw=optionalText(row.name,200);if(!raw)return [];const name=optionalText(raw.split(/[○/／]/)[0].replace(/^实践课程[:：]\s*/,""),100);const explicit=raw.match(/第\s*\d{1,2}\s*周\s*[;；。]?$/)?.[0].replace(/[;；。]$/,"").trim();return name?[{name,weeks:optionalText(row.weeks,120)??explicit??null}]:[];}):[];
   return {status:"ok",kind,confidence,termWeeks,unscheduled,warnings:warnings.slice(0,8),coverage,courses};
 }
 export function parseExtraction(input:unknown){
