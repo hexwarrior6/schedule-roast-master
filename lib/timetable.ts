@@ -36,8 +36,11 @@ function text(value:unknown):string|null {
   return typeof value==="string"&&value.trim()?value.trim():null;
 }
 export function cleanCourseFields(row:Record<string,unknown>,termWeeks:number|null){
-  const original=text(row.name)??"课程名称不清晰";
-  let name=original,timeLabel=text(row.timeLabel),weeks=text(row.weeks);
+  const providedName=text(row.name)??"课程名称不清晰";
+  // Evidence is the literal scheduling excerpt, not a reconstructed string.
+  const evidence=text(row.rawText);
+  const original=evidence??providedName;
+  let name=providedName,timeLabel=text(row.timeLabel),weeks=text(row.weeks);
   let embedded=false,incomplete=false;
   // Chinese university course cells frequently use name/(1-2节)1-3周,5-15周/campus/room/teacher/hours/credits.
   // Parse only explicit delimiters, never infer a clock from periods.
@@ -57,17 +60,30 @@ export function cleanCourseFields(row:Record<string,unknown>,termWeeks:number|nu
     // Strip obvious slash-delimited metadata only when the source has a scheduling marker.
     if(/[/／].*(?:\d+周|\d+节|教室)/.test(original)){name=original.split(/[/／]/)[0].trim();incomplete=true;}
   }
+  // A period string in the week field is not a week range. Never convert 节 to 周.
+  // When it is the only explicit numeric period evidence, use it instead of a row ordinal.
+  const misplacedPeriod=parsePeriods(weeks);
+  if(misplacedPeriod){
+    if(!embedded){
+      timeLabel="第"+misplacedPeriod[0]+(misplacedPeriod[0]===misplacedPeriod[1]?"":"-"+misplacedPeriod[1])+"节";
+    }
+    weeks=null;incomplete=true;
+  }
   if(weeks&&!parseWeekNumbers(weeks,termWeeks)){
     // Remove separately delimited period labels from a polluted week field.
     const parts=punctuation(weeks).split(",");
     const filtered=parts.filter(part=>!parsePeriods(part));
     if(filtered.length!==parts.length&&parseWeekNumbers(filtered.join(","),termWeeks))weeks=filtered.join("、");
-    else if(!/^(?:单|双)(?:数)?周$|^(?:每周|全周|全学期)$/.test(weeks))incomplete=true;
+    else if(!/^(?:单|双)(?:数)?周$|^(?:每周|全周|全学期)$/.test(weeks)){weeks=null;incomplete=true;}
   }
   const periods=parsePeriods(timeLabel);
   if(periods)timeLabel="第"+periods[0]+(periods[1]===periods[0]?"":"-"+periods[1])+"节";
   // Group labels written in Chinese numerals are ambiguous. Preserve the label but do not turn it into a numeric period.
-  return {name:name||"课程名称不清晰",timeLabel,weeks,embedded,incomplete};
+  // Retain only the necessary schedule excerpt (exclude trailing campus/teacher metadata).
+  const rawText=full?original.slice(0,full[0].length).trim().slice(0,300):
+    evidence?evidence.split(/[/／]/).slice(0,2).join("/").slice(0,300):
+    /[/／]\s*[（(]\s*\d/.test(original)?original.split(/[/／]/).slice(0,2).join("/").slice(0,300):null;
+  return {name:name||"课程名称不清晰",timeLabel,weeks,rawText,embedded,incomplete};
 }
 export function buildTimetable(extraction:Extraction):CanonicalSchedule {
   const termWeeks=extraction.termWeeks??null;

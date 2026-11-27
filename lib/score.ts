@@ -1,5 +1,6 @@
 import type { CanonicalSchedule, Report } from "./schema";
 import { summarizeTimetable } from "./timetable";
+import {qualityOf} from "./quality";
 type Key=Report["reviews"][number]["key"];
 type Metric={score:number|null;fact:string};
 const clamp=(n:number)=>Math.max(0,Math.min(100,Math.round(n)));
@@ -9,6 +10,7 @@ const join=(items:number[])=>items.map(n=>"第"+n+"周").join("、");
 /** Deterministic entertainment rubric, not a measure of academic difficulty. */
 export function scoreTimetable(schedule:CanonicalSchedule){
   const f=summarizeTimetable(schedule);
+  const quality=qualityOf(schedule);
   const active=f.weekly.filter(w=>w.knownOccurrences>0);
   const courses=schedule.courses;
   const dayRows=active.flatMap(w=>w.days.map(d=>({...d,week:w.week}))).filter(d=>d.occurrences>0);
@@ -46,13 +48,23 @@ export function scoreTimetable(schedule:CanonicalSchedule){
     social:{score:weekendShown&&active.length?clamp(100-65*weekendWeeks.length/active.length):weekendShown?clamp(100-65*weekendRecords/courses.length):null,fact:(weekendWeeks.length?"已知周末有排课的周次："+join(weekendWeeks)+"。":"没有解析出周末的明确周次记录。")+(shownEmpty.length?"图中可见空白日："+shownEmpty.join("、")+"。":"")+(weekendShown?"":"周末显示不完整，不能断言休息。")},
     happiness:{score:null,fact:""},
   };
+  if(!quality.sufficient){
+    for(const key of ["distribution","endurance","workload","social"] as const){
+      metrics[key].score=null;
+      metrics[key].fact+=" 周次和时间字段同时可解析的比例不足80%，暂不评分。";
+    }
+  }
+  if(courses.some(c=>c.day>=6&&c.weekNumbers===null)||schedule.unscheduled.length){
+    metrics.social.score=null;
+    metrics.social.fact+=" 仍有未确定的周末或实践安排，暂不评分。";
+  }
   const values=Object.entries(metrics).filter(([k,m])=>k!=="happiness"&&m.score!==null).map(([,m])=>m.score!);
-  const score=values.length>=3?clamp(values.reduce((a,b)=>a+b,0)/values.length):null;
-  metrics.happiness={score,fact:score===null?"可评分维度不足，暂不计算综合分。":"综合分来自 "+values.length+" 个可计算维度的平均值，仅作娱乐参考。"};
+  const score=quality.sufficient&&values.length>=3?clamp(values.reduce((a,b)=>a+b,0)/values.length):null;
+  metrics.happiness={score,fact:score===null?(!quality.sufficient?"有效周次和时间字段覆盖不足80%，暂不计算综合分。":"可评分维度不足，暂不计算综合分。"):"综合分来自 "+values.length+" 个可计算维度的平均值，仅作娱乐参考。"};
   const peakText=peakWeeks.length?"已知排课记录峰值为 "+join(peakWeeks)+"（每周 "+peak+" 条）。":"暂无可展开的明确周次。";
   const peakPeriodText=busiest?"单日已知最多占用 "+maxPeriods+" 节（第"+busiest.week+"周"+dayName(busiest.day)+"）。":"";
   const uncertainty=(unknownWeeks?"另有 "+unknownWeeks+" 条记录周次未明。":"")+(schedule.unscheduled.length?"另有 "+schedule.unscheduled.length+" 条未指定星期的实践安排。":"")+(unknownDays.length?"部分日期覆盖不确定："+unknownDays.join("、")+"。":"");
-  const summary="共识别 "+courses.length+" 条排课记录，"+f.distinctCourseNames+" 个不同课程名称。"+peakText+peakPeriodText+uncertainty+(partial?" 以上均为已识别部分，不能据此认定完整学期负担。":"");
+  const summary="共识别 "+courses.length+" 条排课记录，"+f.distinctCourseNames+" 个不同课程名称。"+(!quality.sufficient?"仅 "+quality.bothKnown+"/"+quality.total+" 条记录同时具备可解析周次和时间，暂停综合评分。":peakText+peakPeriodText)+uncertainty+(partial?" 以上均为已识别部分，不能据此认定完整学期负担。":"");
   const tags=[maxRun>=6?"连堂挑战":"节次拼图",irregular>0?"周次迷宫":"排课观察",weekendWeeks.length?"周末有课记录":"周末待核对",partial?"信息待核对":"规则趣味评分"];
   const advice=[
     ...(unknownWeeks||unknownDays.length||schedule.unscheduled.length?["核对原图中未确定的周次、星期及实践安排，再据此制定计划。"]:[]),
@@ -61,5 +73,5 @@ export function scoreTimetable(schedule:CanonicalSchedule){
     ...(weekendWeeks.length?["把 "+join(weekendWeeks)+" 的周末已知课程单独加入日历。"]:[]),
     "按实际周次设置课程提醒，避免把不同周次的同名课程误当成同时上课。",
   ].slice(0,4);
-  return {score,metrics,summary,tags,advice,partial,peakWeeks,maxRun,maxPeriods,weekendWeeks,shownEmpty,unknownDays};
+  return {score,metrics,summary,tags,advice,partial,quality,peakWeeks,maxRun,maxPeriods,weekendWeeks,shownEmpty,unknownDays};
 }

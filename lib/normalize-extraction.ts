@@ -52,8 +52,8 @@ export function normalizeExtraction(input:unknown):unknown {
     if(start&&end&&start>=end){start=null;end=null;incomplete=true;}
     if((optionalText(row.start,80)&&!start)||(optionalText(row.end,80)&&!end))incomplete=true;
     if(!name)incomplete=true;
-    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(fields.timeLabel,80),weeks:optionalText(fields.weeks,120)};
-    const key=JSON.stringify(course);
+    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(fields.timeLabel,80),weeks:optionalText(fields.weeks,120),rawText:fields.rawText};
+    const key=JSON.stringify([course.day,course.name,course.start,course.end,course.timeLabel,course.weeks]);
     // Unreadable names may describe separate blocks. Keep them distinguishable only
     // when the model provided distinct time/period/week data; otherwise flag uncertainty.
     if(keys.has(key)){duplicates++;incomplete=true;continue;}

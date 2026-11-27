@@ -6,6 +6,8 @@ import { reviewResultSchema } from "@/lib/schema";
 import { parseExtraction } from "@/lib/normalize-extraction";
 import {buildTimetable} from "@/lib/timetable";
 import {scoreTimetable} from "@/lib/score";
+import {qualityOf,needsRecheck,mergeRecheck} from "@/lib/quality";
+import type {ChatCompletionContentPart} from "openai/resources/chat/completions";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
 import { resolveAIConfig, completionLimit, providerOptions } from "@/lib/ai-config";
@@ -58,16 +60,13 @@ export async function POST(request: Request) {
   if (!mime || mime !== file.type) return fail("仅支持真实的 JPG、PNG、WebP 图片。",415);
 
   let stage="视觉识别";
+  const deadline=Date.now()+108000;
   try {
     const images=await prepareVisionImages(bytes).catch(()=>null);
     if(!images)return fail("无法解析图片，请上传清晰的 JPG、PNG 或 WebP 截图。",400);
     const visionClient = new OpenAI({apiKey:vision.apiKey,baseURL:vision.baseURL,timeout:50000,maxRetries:0});
     const reviewClient = new OpenAI({apiKey:reviewConfig.apiKey,baseURL:reviewConfig.baseURL,timeout:50000,maxRetries:0});
-    const completion = await visionClient.chat.completions.create({
-      model: vision.model,
-      messages: [
-        {role:"system",content:SCHEDULE_EXTRACTION},
-        {role:"user",content:[
+    const imageParts:ChatCompletionContentPart[]=[
           {type:"text",text:"仅逐日识别图片中所有可见课程块，核对每个星期，暂不评价。"},
           {type:"text",text:"原图：用于确定整体布局与星期节次。"},
           {type:"image_url",image_url:{url:images.full,detail:"high"}},
@@ -77,8 +76,10 @@ export async function POST(request: Request) {
           ]),
           {type:"text",text:"页底放大图：只用于核对表格底部实践课程、备注和学期总周数，不重复计算普通课程。"},
           {type:"image_url",image_url:{url:images.footer,detail:"high"}},
-        ]},
-      ],
+        ];
+    const completion = await visionClient.chat.completions.create({
+      model: vision.model,
+      messages:[{role:"system",content:SCHEDULE_EXTRACTION},{role:"user",content:imageParts}],
       ...completionLimit(vision,10000),
       ...providerOptions(vision),
     }, { signal: request.signal });
@@ -99,14 +100,38 @@ export async function POST(request: Request) {
     }
     if(repaired)console.info("AI extraction normalized",{model:vision.model});
     if (result.data.status === "unreadable") return fail(result.data.reason,422);
-    const extraction=result.data;
+    let extraction=result.data;
     if(Math.min(images.width,images.height)<600){
       if(extraction.confidence==="high")extraction.confidence="medium";
       extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
     }
+    // At most one targeted reread. Keep the initial result if it fails or does not improve.
+    if(needsRecheck(extraction)&&deadline-Date.now()>30000&&!request.signal.aborted){
+      const days=qualityOf(buildTimetable(extraction)).reviewDays;
+      if(days.length){
+        try{
+          const second=await visionClient.chat.completions.create({
+            model:vision.model,
+            messages:[{role:"system",content:SCHEDULE_EXTRACTION},{role:"user",content:[
+              ...imageParts,
+              {type:"text",text:"专项复核：仅重新读取以下星期的整列或整行，星期编号 "+days.join("、")+"。其他星期不要添加课程。重新从图中逐字抄写 rawText，必须保留原始节次和周次，扫描遗漏的同格多条安排；不要根据第一次结果补造。被复核日期的 coverage.count 必须等于实际返回记录数量。"}
+            ]}],
+            ...completionLimit(vision,10000),...providerOptions(vision)
+          },{signal:request.signal,timeout:Math.min(30000,Math.max(1000,deadline-Date.now()-22000))});
+          const answer=second.choices?.[0]?.message?.content;
+          if(answer&&second.choices[0].finish_reason==="stop"){
+            const retry=parseExtraction(JSON.parse(answer.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"")));
+            if(retry.result.success&&retry.result.data.status==="ok"){
+              extraction=mergeRecheck(extraction,retry.result.data,days);
+            }
+          }
+        }catch{console.info("AI targeted reread unavailable");}
+      }
+    }
     const schedule=buildTimetable(extraction);
     const facts=scoreTimetable(schedule);
     stage="文本评价";
+    if(deadline-Date.now()<8000)return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
     const reviewCompletion=await reviewClient.chat.completions.create({
       model:reviewConfig.model,
       messages:[
@@ -115,7 +140,8 @@ export async function POST(request: Request) {
       ],
       ...completionLimit(reviewConfig,6500),
       ...providerOptions(reviewConfig),
-    },{signal:request.signal});
+    },{signal:request.signal,timeout:Math.min(50000,Math.max(1000,deadline-Date.now()))}).catch(()=>null);
+    if(!reviewCompletion)return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
     const reviewRaw=reviewCompletion.choices?.[0]?.message?.content?.trim();
     const reason=reviewCompletion.choices?.[0]?.finish_reason;
     if(!reviewRaw||reason==="length"||reason==="content_filter"||String(reason)==="error"){

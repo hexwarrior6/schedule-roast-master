@@ -15,6 +15,7 @@ const clock = z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).nullable();
 
 export const courseSchema = z.object({
   name: z.string().min(1).max(100),
+  rawText: z.string().max(300).nullable().optional(),
   day: z.number().int().min(1).max(7),
   start: clock,
   end: clock,
