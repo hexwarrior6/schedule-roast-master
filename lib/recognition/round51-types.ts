@@ -1,0 +1,14 @@
+import {z} from "zod";
+import {resultSchema} from "./types";
+export const methods=["V1","V18","V22","V23"] as const;
+export type Method=typeof methods[number];
+export const methodNames:Record<Method,string>={V1:"原版上下文",V18:"局部拓扑",V22:"可靠性路由",V23:"可靠性路由 + 局部 OCR"};
+export const result51Schema=resultSchema.extend({method:z.enum(methods),dependencies:z.array(z.enum(methods))});
+export type Result=z.infer<typeof result51Schema>;
+export type Inputs=Partial<Record<Method,Result>>;
+export type {OCR} from "./round5-types";
+const bounds=z.tuple([z.number(),z.number(),z.number(),z.number()]);
+export const cropSchema=z.object({id:z.string().regex(/^C\d{1,3}$/),bounds,reason:z.string().max(100)});
+export const localSchema=z.object({cells:z.array(z.object({id:z.string().regex(/^C\d{1,3}$/),text:z.string().max(16000)})).max(4),totalMs:z.number().nonnegative()});
+export type Crop=z.infer<typeof cropSchema>;
+export type Local=z.infer<typeof localSchema>;

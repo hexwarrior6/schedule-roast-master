@@ -64,6 +64,14 @@ class handler(BaseHTTPRequestHandler):
             if params.get("topology")==["1"]:
                 from ocr_lab.topology import both
                 report["topology"]=both(image,report,report.get("layout"))
+            if params.get("topology")==["geometry"]:
+                try:
+                    from ocr_lab.topology import local_topology
+                    geometry=local_topology(image,report,report.get("layout"))
+                    report["topology"]={"geometry":geometry,"learned":{"status":"unresolved","source":"not requested","cells":[],"ticks":[],"elapsedMs":0}}
+                except Exception as exc:
+                    print("Geometry stage failure:",type(exc).__name__)
+                    report["layoutError"]="Geometry stage failed: "+type(exc).__name__
             self.respond(200,report)
         except Exception as exc:
             print("OCR inference failure:",type(exc).__name__)
