@@ -51,8 +51,13 @@ class handler(BaseHTTPRequestHandler):
                 return
             report=recognize(image)
             if params.get("layout")==["1"]:
-                from ocr_lab.layout import build_layout
-                report["layout"]=build_layout(image,report)
+                try:
+                    from ocr_lab.layout import build_layout
+                    report["layout"]=build_layout(image,report)
+                except Exception as exc:
+                    if params.get("resilient")!=["1"]:raise
+                    print("Layout stage failure:",type(exc).__name__)
+                    report["layoutError"]="Layout stage failed: "+type(exc).__name__
             self.respond(200,report)
         except Exception as exc:
             print("OCR inference failure:",type(exc).__name__)
