@@ -73,7 +73,7 @@ export async function POST(request:Request){
   const output=r.choices[0]?.message?.content??"",finish=r.choices[0]?.finish_reason??null;
   let value:unknown=null;if(finish==="stop")try{value=JSON.parse(output.trim().replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,""))}catch{}
   const n=normalize5(value);
-  result.schedule=n.schedule;result.status=n.schedule?(ocr?"ok":"partial"):"failed";
+  result.schedule=n.schedule;result.status=n.schedule?(ocr&&(method!=="V23"||!crops.length||supplemental.length===crops.length)?"ok":"partial"):"failed";
   result.diagnostics={rawModelOutput:value??output.slice(0,60000),finishReason:finish,repairs:n.repairs,unresolved:n.unresolved,assessment,crops,supplemental,localMs:local?.totalMs??null,ocrAvailable:!!ocr,visualOnly:!ocr,fallback:!ocr?"vision only":assessment.route==="context"?"context without geometry":null};
   result.warnings=[assessment.route==="structured"?"使用经过质量检查的局部结构候选。":"结构证据不足，主动回退全图上下文，不强制星期或节次。",...(method==="V23"&&crops.length&&!supplemental.length?["局部复核未返回有效文字，保留原始证据。"]:[])];
   if(!n.schedule)result.error="模型输出不完整或不能解析";return done();

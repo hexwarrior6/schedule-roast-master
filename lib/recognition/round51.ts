@@ -8,7 +8,7 @@ const overlap=(a:number[],b:number[])=>Math.max(0,Math.min(a[2],b[2])-Math.max(a
 const area=(a:number[])=>Math.max(0,a[2]-a[0])*Math.max(0,a[3]-a[1]);
 const box=(l:OCR["lines"][number])=>[Math.min(...l.box.map(p=>p[0])),Math.min(...l.box.map(p=>p[1])),Math.max(...l.box.map(p=>p[0])),Math.max(...l.box.map(p=>p[1]))];
 const center=(l:OCR["lines"][number])=>[l.box.reduce((n,p)=>n+p[0],0)/4,l.box.reduce((n,p)=>n+p[1],0)/4];
-const label=(s:string)=>{const v=s.normalize("NFKC").replace(/\s/g,"").toLowerCase().replace(/\.$/,"");const m=v.match(/^(?:星期|周|礼拜)?([一二三四五六日天1-7])$/);if(m)return /^\d$/.test(m[1])?null:Math.min(7,"一二三四五六日天".indexOf(m[1])+1);return ["mon","tue","wed","thu","fri","sat","sun"].findIndex((x,i)=>v===x||v===["monday","tuesday","wednesday","thursday","friday","saturday","sunday"][i])+1||null;};
+const label=(s:string)=>{const v=s.normalize("NFKC").replace(/\s/g,"").toLowerCase().replace(/\.$/,"");const m=v.match(/^(?:星期|周|礼拜)?([一二三四五六日天1-7])$/);if(m)return /^\d$/.test(m[1])?(v.length>1?Number(m[1]):null):Math.min(7,"一二三四五六日天".indexOf(m[1])+1);return ["mon","tue","wed","thu","fri","sat","sun"].findIndex((x,i)=>v===x||v===["monday","tuesday","wednesday","thursday","friday","saturday","sunday"][i])+1||null;};
 function validBounds(b:number[],o:OCR){return b[0]>=0&&b[1]>=0&&b[2]<=o.width&&b[3]<=o.height&&b[2]-b[0]>=8&&b[3]-b[1]>=8;}
 function explicitSpans(s:string){
  return Array.from(s.normalize("NFKC").matchAll(/(?:第)?\d{1,2}\s*[-–—~至]\s*\d{1,2}\s*节|第\d{1,2}\s*节/g),m=>parsePeriods(m[0])).filter((x):x is [number,number]=>!!x);
@@ -69,7 +69,7 @@ export function planCrops(ocr:OCR|null,layout:Layout|null,topology:Topology|null
   }
  }
  const cells=topology?.geometry.cells??[];
- const weak=cells.filter(c=>c.lineIds.length&&c.lineIds.some(i=>ocr.lines[i]?.score<.8||box(ocr.lines[i])[3]-box(ocr.lines[i])[1]<13)).sort((a,b)=>Math.min(...a.lineIds.map(i=>ocr.lines[i]?.score??1))-Math.min(...b.lineIds.map(i=>ocr.lines[i]?.score??1)));
+ const weak=cells.filter(c=>c.lineIds.length&&c.lineIds.some(i=>{const l=ocr.lines[i];return !!l&&(l.score<.8||box(l)[3]-box(l)[1]<13);})).sort((a,b)=>Math.min(...a.lineIds.map(i=>ocr.lines[i]?.score??1))-Math.min(...b.lineIds.map(i=>ocr.lines[i]?.score??1)));
  for(const c of weak)add(c.bounds,"small or low-confidence cell text");
  // For unresolved layouts, re-read a bounded low-confidence individual line.
  for(const l of [...ocr.lines].sort((a,b)=>a.score-b.score).filter(l=>l.score<.7&&l.text.trim().length>=2)){
