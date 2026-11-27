@@ -42,7 +42,7 @@ AI_REVIEW_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 OPENROUTER_API_KEY=your-openrouter-key
 ```
 
-阶段模型优先于 AI_MODEL，阶段端点优先于 AI_BASE_URL。阶段专用 AI_VISION_API_KEY / AI_REVIEW_API_KEY 优先；OpenRouter 可共享 OPENROUTER_API_KEY。仅当端点与共享端点相同时，才允许回退到 AI_API_KEY，避免把其他供应商的密钥发送给新端点。视觉模型需支持 OpenAI 兼容 Chat Completions 与 image_url data URL，评价模型只需支持文本。OpenRouter 与 GPT-5 使用 max_completion_tokens；实际模型兼容性需实测。密钥只在服务端读取。ANALYSIS_ACCESS_CODE 是可选的共享测试访问码，不是完整用户系统。
+阶段模型优先于 AI_MODEL，阶段端点优先于 AI_BASE_URL。阶段专用 AI_VISION_API_KEY / AI_REVIEW_API_KEY 优先；OpenRouter 可共享 OPENROUTER_API_KEY。仅当端点与共享端点相同时，才允许回退到 AI_API_KEY，避免把其他供应商的密钥发送给新端点。视觉模型需支持 OpenAI 兼容 Chat Completions 与 image_url data URL，评价模型只需支持文本。OpenRouter 使用 max_tokens，直接调用 OpenAI GPT-5 使用 max_completion_tokens。OpenRouter NVIDIA Nemotron 默认关闭思考并请求 JSON 对象；实际模型兼容性需实测。密钥只在服务端读取。ANALYSIS_ACCESS_CODE 是可选的共享测试访问码，不是完整用户系统。
 
 ## 检查
 

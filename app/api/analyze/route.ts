@@ -6,7 +6,7 @@ import { extractionResultSchema, reviewResultSchema } from "@/lib/schema";
 import { analyzeCourses } from "@/lib/analyzer";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
-import { resolveAIConfig, completionLimit } from "@/lib/ai-config";
+import { resolveAIConfig, completionLimit, providerOptions } from "@/lib/ai-config";
 import { detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
 
 export const runtime = "nodejs";
@@ -76,9 +76,14 @@ export async function POST(request: Request) {
         ]},
       ],
       ...completionLimit(vision,10000),
+      ...providerOptions(vision),
     }, { signal: request.signal });
-    const raw = completion.choices[0]?.message?.content?.trim();
-    if (!raw) return fail("模型没有返回有效结果，请重试。",502);
+    const raw = completion.choices?.[0]?.message?.content?.trim();
+    if (!raw || completion.choices?.[0]?.finish_reason==="length" || completion.choices?.[0]?.finish_reason==="content_filter" || String(completion.choices?.[0]?.finish_reason)==="error") {
+      const reason=completion.choices?.[0]?.finish_reason;
+      console.warn("AI completion incomplete",{stage,model:vision.model,finishReason:reason,hasContent:Boolean(raw),choiceCount:completion.choices?.length??0,completionTokens:completion.usage?.completion_tokens,reasoningTokens:completion.usage?.completion_tokens_details?.reasoning_tokens});
+      return fail(reason==="length"?"视觉模型输出达到 Token 上限，请重试或换一张清晰图片。":"视觉模型未返回完整答案，请稍后重试。",502);
+    }
     const clean = raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
     let parsed: unknown;
     try { parsed = JSON.parse(clean); } catch { return fail("模型返回格式异常，请重试。",502); }
@@ -98,9 +103,14 @@ export async function POST(request: Request) {
         {role:"user",content:JSON.stringify({extraction,stats:analyzeCourses(extraction.courses)})},
       ],
       ...completionLimit(reviewConfig,6500),
+      ...providerOptions(reviewConfig),
     },{signal:request.signal});
-    const reviewRaw=reviewCompletion.choices[0]?.message?.content?.trim();
-    if(!reviewRaw)return fail("课表已识别，但模型没有生成评价，请重试。",502);
+    const reviewRaw=reviewCompletion.choices?.[0]?.message?.content?.trim();
+    const reason=reviewCompletion.choices?.[0]?.finish_reason;
+    if(!reviewRaw||reason==="length"||reason==="content_filter"||String(reason)==="error"){
+      console.warn("AI completion incomplete",{stage,model:reviewConfig.model,finishReason:reason,hasContent:Boolean(reviewRaw),choiceCount:reviewCompletion.choices?.length??0,completionTokens:reviewCompletion.usage?.completion_tokens,reasoningTokens:reviewCompletion.usage?.completion_tokens_details?.reasoning_tokens});
+      return fail(reason==="length"?"文本评价达到 Token 上限，请重试。":"课表已识别，但评价模型未返回完整答案，请重试。",502);
+    }
     let reviewJson:unknown;
     try{reviewJson=JSON.parse(reviewRaw.replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,"").trim());}
     catch{return fail("评价格式异常，请重试。",502);}

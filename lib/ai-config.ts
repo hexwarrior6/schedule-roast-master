@@ -15,6 +15,13 @@ export function resolveAIConfig(stage:Stage,env:Env):AIConfig|null {
   return {baseURL,apiKey,model,openRouter};
 }
 export function completionLimit(config:AIConfig,n:number){
-  return config.openRouter || /^gpt-5(?:[.\-]|$)|^o[1-9](?:[.\-]|$)/.test(config.model)
+  return !config.openRouter && /^gpt-5(?:[.\-]|$)|^o[1-9](?:[.\-]|$)/.test(config.model)
     ? {max_completion_tokens:n}:{max_tokens:n};
+}
+
+export function providerOptions(config:AIConfig){
+  // OpenRouter's NVIDIA VL has thinking on by default. Reserve completion budget for JSON.
+  return config.openRouter && config.model.startsWith("nvidia/nemotron-")
+    ? {reasoning:{enabled:false},temperature:0.2,response_format:{type:"json_object" as const}}
+    : {};
 }

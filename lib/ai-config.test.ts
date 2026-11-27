@@ -1,5 +1,5 @@
 import {describe,it,expect} from "vitest";
-import {resolveAIConfig,completionLimit} from "./ai-config";
+import {resolveAIConfig,completionLimit,providerOptions} from "./ai-config";
 describe("独立模型端点配置",()=>{
   it("兼容旧的共享配置",()=>{
     const env={AI_API_KEY:"test",AI_MODEL:"gpt-4o"};
@@ -19,5 +19,8 @@ describe("独立模型端点配置",()=>{
     const cfg=resolveAIConfig("VISION",{AI_API_KEY:"test",AI_MODEL:"gpt-5.4"})!;
     expect(completionLimit(cfg,123)).toEqual({max_completion_tokens:123});
     expect(completionLimit({...cfg,model:"gpt-4o"},123)).toEqual({max_tokens:123});
+    expect(completionLimit({...cfg,openRouter:true,model:"nvidia/nemotron-3.5-super-vl:free"},123)).toEqual({max_tokens:123});
+    expect(providerOptions({...cfg,openRouter:true,model:"nvidia/nemotron-3.5-super-vl:free"})).toMatchObject({reasoning:{enabled:false},response_format:{type:"json_object"}});
+    expect(providerOptions(cfg)).toEqual({});
   });
 });
