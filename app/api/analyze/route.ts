@@ -5,6 +5,7 @@ import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
 import { extractionResultSchema, reviewResultSchema } from "@/lib/schema";
 import { analyzeCourses } from "@/lib/analyzer";
 import { buildReport } from "@/lib/report";
+import { prepareVisionImages } from "@/lib/vision";
 import { detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
 
 export const runtime = "nodejs";
@@ -54,6 +55,8 @@ export async function POST(request: Request) {
   if (!mime || mime !== file.type) return fail("仅支持真实的 JPG、PNG、WebP 图片。",415);
 
   try {
+    const images=await prepareVisionImages(bytes).catch(()=>null);
+    if(!images)return fail("无法解析图片，请上传清晰的 JPG、PNG 或 WebP 截图。",400);
     const client = new OpenAI({
       apiKey: process.env.AI_API_KEY,
       baseURL: process.env.AI_BASE_URL || "https://api.openai.com/v1",
@@ -66,7 +69,12 @@ export async function POST(request: Request) {
         {role:"system",content:SCHEDULE_EXTRACTION},
         {role:"user",content:[
           {type:"text",text:"仅逐日识别图片中所有可见课程块，核对每个星期，暂不评价。"},
-          {type:"image_url",image_url:{url:"data:"+mime+";base64,"+Buffer.from(bytes).toString("base64"),detail:"high"}},
+          {type:"text",text:"原图：用于确定整体布局与星期节次。"},
+          {type:"image_url",image_url:{url:images.full,detail:"high"}},
+          ...images.crops.flatMap(crop=>[
+            {type:"text" as const,text:"同一课表的"+crop.label+"局部放大图（与其他区域有重叠）。"},
+            {type:"image_url" as const,image_url:{url:crop.url,detail:"high" as const}},
+          ]),
         ]},
       ],
       max_tokens: 6500,
@@ -80,8 +88,9 @@ export async function POST(request: Request) {
     if (!result.success) return fail("模型结果不完整，请重新分析或换一张更清晰的课表。",502);
     if (result.data.status === "unreadable") return fail(result.data.reason,422);
     const extraction=result.data;
-    if(extraction.kind!=="personal"){
-      return NextResponse.json(buildReport(extraction),{headers:{"Cache-Control":"no-store"}});
+    if(Math.min(images.width,images.height)<600){
+      if(extraction.confidence==="high")extraction.confidence="medium";
+      extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
     }
     const reviewCompletion=await client.chat.completions.create({
       model:process.env.AI_MODEL,

@@ -32,7 +32,7 @@ export default function AnalysisReport({report,demo,onReset}:{report:Report;demo
       <div className="report-top"><span className="eyebrow"><span className="dot"/> 学期生存报告 / {demo?"DEMO":"REPORT"}</span><span className="report-mark"><Flame size={16}/> ROAST MASTER</span></div>
       <div className="report-title-row">
         <div className="report-headline"><div className="level">{level}</div><h1>{report.title}</h1><p>{report.summary}</p><div className="tags">{report.tags.map((tag,i)=><span key={i}># {tag}</span>)}</div></div>
-        <div className="score-wrap"><div className="score-ring" style={{background:"conic-gradient(#ec5b3c "+(report.score??0)+"%, #eae3d7 0)"}}><div><strong>{report.score??"—"}{report.score!==null&&<small>/100</small>}</strong><span>学期幸福度</span></div></div><small>{report.score===null?"信息不足，暂不评分":"AI 趣味估计"}</small></div>
+        <div className="score-wrap"><div className="score-ring" style={{background:"conic-gradient(#ec5b3c "+(report.score??0)+"%, #eae3d7 0)"}}><div><strong>{report.score??"—"}{report.score!==null&&<small>/100</small>}</strong><span>{report.kind&&report.kind!=="personal"?"排课趣味评分":"学期幸福度"}</span></div></div><small>{report.score===null?"部分信息不足，见下方点评":report.kind&&report.kind!=="personal"?"假设性评价 · 非真实负担":"AI 趣味估计"}</small></div>
       </div>
       <div className="metric-grid">
         <div><Layers size={19}/><strong>{data.visibleCount}</strong><span>可见课程块</span></div>

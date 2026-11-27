@@ -13,6 +13,6 @@ describe("识别与评价分离",()=>{
   it("接受五日16块的合成回归数据",()=>expect(extractionSchema.safeParse(sample).success).toBe(true));
   it("拒绝逐日计数与课程明细不一致",()=>expect(extractionSchema.safeParse({...sample,courses:sample.courses.filter(c=>c.day!==4)}).success).toBe(false));
   it("拒绝未显示日期存在课程",()=>expect(extractionSchema.safeParse({...sample,coverage:sample.coverage.map(r=>r.day===4?{...r,visibility:"not_shown"}:r)}).success).toBe(false));
-  it("目录或候选列表不生成个人分数",()=>{const r=buildReport({...sample,kind:"catalog"});expect(r.score).toBeNull();expect(r.courses).toHaveLength(16);expect(r.reviews.every(x=>x.score===null)).toBe(true);});
+  it("课程目录仍正常生成假设性评价",()=>{const r=buildReport({...sample,kind:"catalog"},review);expect(r.score).not.toBeNull();expect(r.courses).toHaveLength(16);expect(r.reviews.some(x=>x.score!==null)).toBe(true);expect(r.warnings[0]).toContain("假设性");});
   it("没有钟表时间或周次时覆盖模型错误评分",()=>{const r=buildReport(sample,review);expect(r.reviews.find(x=>x.key==="early")?.score).toBeNull();expect(r.reviews.find(x=>x.key==="weeks")?.score).toBeNull();expect(r.courses).toHaveLength(16);});
 });
