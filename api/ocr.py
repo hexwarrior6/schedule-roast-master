@@ -24,7 +24,10 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():return
         try:
-            from ocr_lab.engine import smoke
+            if parse_qs(urlparse(self.path).query).get("topology")==["1"]:
+                from ocr_lab.topology import smoke
+            else:
+                from ocr_lab.engine import smoke
             self.respond(200,smoke())
         except Exception as exc:
             print("OCR smoke failure:",type(exc).__name__)
@@ -58,6 +61,9 @@ class handler(BaseHTTPRequestHandler):
                     if params.get("resilient")!=["1"]:raise
                     print("Layout stage failure:",type(exc).__name__)
                     report["layoutError"]="Layout stage failed: "+type(exc).__name__
+            if params.get("topology")==["1"]:
+                from ocr_lab.topology import both
+                report["topology"]=both(image,report,report.get("layout"))
             self.respond(200,report)
         except Exception as exc:
             print("OCR inference failure:",type(exc).__name__)
