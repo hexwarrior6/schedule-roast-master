@@ -1,0 +1,7 @@
+# OCR experiment (preview only)
+
+RapidOCR 3.10.0 + ONNX Runtime CPU, Python 3.12. /ocr-lab is an independent test page; GET /api/ocr runs a generated synthetic grid, POST /api/ocr accepts raw image bytes (3 MiB max). The original Next.js analysis path is unchanged. Python dependencies are pinned at the direct-dependency level; deployment must confirm compatibility and bundle size. The default RapidOCR package includes its small model weights.
+
+Grid detection uses long horizontal/vertical lines and OCR-recognized weekday headers, rather than assuming seven equally spaced columns. When the grid cannot be uniquely resolved, all text boxes are still returned; no forced mapping. Cell grouping is preliminary, not full schedule extraction. Unassigned boxes include titles, footer, time labels and any unresolved text. This version does not infer semester weeks or split multi-course cells into CanonicalSchedule records yet.
+
+Test with independent screenshots (Chinese/English, sparse/dense, merged or borderless, horizontal/vertical weekday axis), compare OCR text and cell position with manually labelled references, then compare complete course records after implementing the common parser. Never commit real user images. Synthetic smoke test is not an accuracy benchmark. The lab keeps uploads in memory and does not call AI providers; do not publish exported OCR JSON containing personal data.
