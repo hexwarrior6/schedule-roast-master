@@ -6,6 +6,7 @@ import { extractionResultSchema, reviewResultSchema } from "@/lib/schema";
 import { analyzeCourses } from "@/lib/analyzer";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
+import { resolveAIConfig, completionLimit } from "@/lib/ai-config";
 import { detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
 
 export const runtime = "nodejs";
@@ -34,9 +35,9 @@ export async function POST(request: Request) {
   if (expected && !checkCode(request.headers.get("x-analysis-code") ?? "",expected)) {
     return fail("访问码无效。",401);
   }
-  if (!process.env.AI_API_KEY || !process.env.AI_MODEL) {
-    return fail("AI 服务尚未配置。你仍可在首页体验示例报告。",503);
-  }
+  const vision=resolveAIConfig("VISION",process.env);
+  const reviewConfig=resolveAIConfig("REVIEW",process.env);
+  if(!vision||!reviewConfig)return fail("视觉识别或评价模型尚未配置。请检查服务端模型、端点和密钥。",503);
   const length = Number(request.headers.get("content-length") ?? 0);
   if (length > MAX_IMAGE_BYTES + 65536) return fail("图片超过上传限制。",413);
   if (!request.headers.get("content-type")?.startsWith("multipart/form-data")) return fail("请选择图片上传。",415);
@@ -54,17 +55,14 @@ export async function POST(request: Request) {
   const mime = detectedImageType(bytes);
   if (!mime || mime !== file.type) return fail("仅支持真实的 JPG、PNG、WebP 图片。",415);
 
+  let stage="视觉识别";
   try {
     const images=await prepareVisionImages(bytes).catch(()=>null);
     if(!images)return fail("无法解析图片，请上传清晰的 JPG、PNG 或 WebP 截图。",400);
-    const client = new OpenAI({
-      apiKey: process.env.AI_API_KEY,
-      baseURL: process.env.AI_BASE_URL || "https://api.openai.com/v1",
-      timeout: 45000,
-      maxRetries: 0,
-    });
-    const completion = await client.chat.completions.create({
-      model: process.env.AI_MODEL,
+    const visionClient = new OpenAI({apiKey:vision.apiKey,baseURL:vision.baseURL,timeout:50000,maxRetries:0});
+    const reviewClient = new OpenAI({apiKey:reviewConfig.apiKey,baseURL:reviewConfig.baseURL,timeout:50000,maxRetries:0});
+    const completion = await visionClient.chat.completions.create({
+      model: vision.model,
       messages: [
         {role:"system",content:SCHEDULE_EXTRACTION},
         {role:"user",content:[
@@ -77,7 +75,7 @@ export async function POST(request: Request) {
           ]),
         ]},
       ],
-      max_tokens: 6500,
+      ...completionLimit(vision,10000),
     }, { signal: request.signal });
     const raw = completion.choices[0]?.message?.content?.trim();
     if (!raw) return fail("模型没有返回有效结果，请重试。",502);
@@ -92,13 +90,14 @@ export async function POST(request: Request) {
       if(extraction.confidence==="high")extraction.confidence="medium";
       extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
     }
-    const reviewCompletion=await client.chat.completions.create({
-      model:process.env.AI_MODEL,
+    stage="文本评价";
+    const reviewCompletion=await reviewClient.chat.completions.create({
+      model:reviewConfig.model,
       messages:[
         {role:"system",content:SCHEDULE_REVIEW},
         {role:"user",content:JSON.stringify({extraction,stats:analyzeCourses(extraction.courses)})},
       ],
-      max_tokens:3500,
+      ...completionLimit(reviewConfig,6500),
     },{signal:request.signal});
     const reviewRaw=reviewCompletion.choices[0]?.message?.content?.trim();
     if(!reviewRaw)return fail("课表已识别，但模型没有生成评价，请重试。",502);
@@ -109,7 +108,9 @@ export async function POST(request: Request) {
     if(!review.success)return fail("模型评价不完整，请重试。",502);
     return NextResponse.json(buildReport(extraction,review.data),{headers:{"Cache-Control":"no-store"}});
   } catch (error) {
-    if (error instanceof OpenAI.APIError && error.status === 429) return fail("AI 服务繁忙或额度不足，请稍后重试。",503);
-    return fail("AI 分析暂时失败，请稍后重试或检查服务配置。",502);
+    if (error instanceof OpenAI.APIError && error.status === 429) return fail(stage+"模型繁忙或免费额度不足，请稍后重试。",503);
+    // Do not log request bodies, provider error messages, keys or course data.
+    console.warn("AI stage failed",{stage,status:error instanceof OpenAI.APIError?error.status:undefined});
+    return fail(stage+"暂时失败，请稍后重试或检查服务配置。",502);
   }
 }

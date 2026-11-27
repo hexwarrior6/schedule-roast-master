@@ -32,7 +32,17 @@ AI_MODEL=your-vision-model
 ANALYSIS_ACCESS_CODE=
 ```
 
-模型必须支持 OpenAI 兼容 Chat Completions、image_url data URL 与文本输出；部分供应商对 max_tokens 或输出 JSON 格式支持不同，需实测。密钥只在服务端读取。ANALYSIS_ACCESS_CODE 是可选的共享测试访问码，不是完整用户系统。
+也可以使用 OpenRouter 免费双模型：
+
+```dotenv
+AI_VISION_BASE_URL=https://openrouter.ai/api/v1
+AI_REVIEW_BASE_URL=https://openrouter.ai/api/v1
+AI_VISION_MODEL=nvidia/nemotron-3.5-super-vl:free
+AI_REVIEW_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+OPENROUTER_API_KEY=your-openrouter-key
+```
+
+阶段模型优先于 AI_MODEL，阶段端点优先于 AI_BASE_URL。阶段专用 AI_VISION_API_KEY / AI_REVIEW_API_KEY 优先；OpenRouter 可共享 OPENROUTER_API_KEY。仅当端点与共享端点相同时，才允许回退到 AI_API_KEY，避免把其他供应商的密钥发送给新端点。视觉模型需支持 OpenAI 兼容 Chat Completions 与 image_url data URL，评价模型只需支持文本。OpenRouter 与 GPT-5 使用 max_completion_tokens；实际模型兼容性需实测。密钥只在服务端读取。ANALYSIS_ACCESS_CODE 是可选的共享测试访问码，不是完整用户系统。
 
 ## 检查
 
@@ -46,7 +56,7 @@ pnpm build
 
 ## Vercel 部署
 
-导入 GitHub 仓库，选择 Next.js 框架，设置上述环境变量，再部署。API Route 使用 Node.js runtime，单张图片的上传上限为 3 MiB。大图会先在浏览器压缩；服务器再检查大小与文件签名。每次模型请求设置 45 秒超时；API Route 最大时长 120 秒。所有可识别课表通常两次调用。局部放大提高可读性，但不能恢复原图缺失细节，且会增加图片 token 消耗。
+导入 GitHub 仓库，选择 Next.js 框架，设置上述环境变量，再部署。API Route 使用 Node.js runtime，单张图片的上传上限为 3 MiB。大图会先在浏览器压缩；服务器再检查大小与文件签名。每次模型请求设置 50 秒超时；API Route 最大时长 120 秒。所有可识别课表通常两次调用。局部放大提高可读性，但不能恢复原图缺失细节，且会增加图片 token 消耗。
 
 **公开上线前**：配置 Vercel Firewall 或其他网关的跨实例限流、供应商额度和消费上限。代码内的单实例限流不是生产级分布式限流。测试部署建议设置 ANALYSIS_ACCESS_CODE。实际部署平台的执行时长及模型兼容性需验证。
 
