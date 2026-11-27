@@ -1,0 +1,15 @@
+[project]
+name = "schedule-roast-master-ocr"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "rapidocr==3.10.0",
+    "onnxruntime==1.23.2",
+    "rapid-table==3.0.0",
+    "opencv-python-headless>=4.5.1.48",
+]
+
+[tool.uv]
+package = false
+# Both libraries import cv2. Keep the headless build used by RapidOCR.
+exclude-dependencies = ["opencv-python"]
