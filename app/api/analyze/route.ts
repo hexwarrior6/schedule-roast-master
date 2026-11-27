@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { timingSafeEqual } from "node:crypto";
-import { SCHEDULE_GENERAL_ANALYSIS } from "@/lib/prompts";
-import { modelResultSchema } from "@/lib/schema";
+import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
+import { reviewResultSchema } from "@/lib/schema";
+import { parseExtraction } from "@/lib/normalize-extraction";
+import {buildTimetable} from "@/lib/timetable";
+import {scoreTimetable} from "@/lib/score";
+import {qualityOf,needsRecheck,mergeRecheck} from "@/lib/quality";
+import type {ChatCompletionContentPart} from "openai/resources/chat/completions";
+import { buildReport } from "@/lib/report";
+import { prepareVisionImages } from "@/lib/vision";
+import { resolveAIConfig, completionLimit, providerOptions } from "@/lib/ai-config";
 import { detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const fail = (message:string,status:number) => NextResponse.json({error:message},{status,headers:{"Cache-Control":"no-store"}});
 function checkCode(provided: string, expected: string) {
@@ -31,9 +39,9 @@ export async function POST(request: Request) {
   if (expected && !checkCode(request.headers.get("x-analysis-code") ?? "",expected)) {
     return fail("访问码无效。",401);
   }
-  if (!process.env.AI_API_KEY || !process.env.AI_MODEL) {
-    return fail("AI 服务尚未配置。你仍可在首页体验示例报告。",503);
-  }
+  const vision=resolveAIConfig("VISION",process.env);
+  const reviewConfig=resolveAIConfig("REVIEW",process.env);
+  if(!vision||!reviewConfig)return fail("视觉识别或评价模型尚未配置。请检查服务端模型、端点和密钥。",503);
   const length = Number(request.headers.get("content-length") ?? 0);
   if (length > MAX_IMAGE_BYTES + 65536) return fail("图片超过上传限制。",413);
   if (!request.headers.get("content-type")?.startsWith("multipart/form-data")) return fail("请选择图片上传。",415);
@@ -51,35 +59,106 @@ export async function POST(request: Request) {
   const mime = detectedImageType(bytes);
   if (!mime || mime !== file.type) return fail("仅支持真实的 JPG、PNG、WebP 图片。",415);
 
+  let stage="视觉识别";
+  const deadline=Date.now()+108000;
   try {
-    const client = new OpenAI({
-      apiKey: process.env.AI_API_KEY,
-      baseURL: process.env.AI_BASE_URL || "https://api.openai.com/v1",
-      timeout: 45000,
-      maxRetries: 0,
-    });
-    const completion = await client.chat.completions.create({
-      model: process.env.AI_MODEL,
-      messages: [
-        {role:"system",content:SCHEDULE_GENERAL_ANALYSIS},
-        {role:"user",content:[
-          {type:"text",text:"识别这张大学课表并生成评价，按照指定 JSON 格式返回。"},
-          {type:"image_url",image_url:{url:"data:"+mime+";base64,"+Buffer.from(bytes).toString("base64")}},
-        ]},
-      ],
-      max_tokens: 6500,
+    const images=await prepareVisionImages(bytes).catch(()=>null);
+    if(!images)return fail("无法解析图片，请上传清晰的 JPG、PNG 或 WebP 截图。",400);
+    const visionClient = new OpenAI({apiKey:vision.apiKey,baseURL:vision.baseURL,timeout:50000,maxRetries:0});
+    const reviewClient = new OpenAI({apiKey:reviewConfig.apiKey,baseURL:reviewConfig.baseURL,timeout:50000,maxRetries:0});
+    const imageParts:ChatCompletionContentPart[]=[
+          {type:"text",text:"仅逐日识别图片中所有可见课程块，核对每个星期，暂不评价。"},
+          {type:"text",text:"原图：用于确定整体布局与星期节次。"},
+          {type:"image_url",image_url:{url:images.full,detail:"high"}},
+          ...images.crops.flatMap(crop=>[
+            {type:"text" as const,text:"同一课表的"+crop.label+"局部放大图（与其他区域有重叠）。"},
+            {type:"image_url" as const,image_url:{url:crop.url,detail:"high" as const}},
+          ]),
+          {type:"text",text:"页底放大图：只用于核对表格底部实践课程、备注和学期总周数，不重复计算普通课程。"},
+          {type:"image_url",image_url:{url:images.footer,detail:"high"}},
+        ];
+    const completion = await visionClient.chat.completions.create({
+      model: vision.model,
+      messages:[{role:"system",content:SCHEDULE_EXTRACTION},{role:"user",content:imageParts}],
+      ...completionLimit(vision,10000),
+      ...providerOptions(vision),
     }, { signal: request.signal });
-    const raw = completion.choices[0]?.message?.content?.trim();
-    if (!raw) return fail("模型没有返回有效结果，请重试。",502);
+    const raw = completion.choices?.[0]?.message?.content?.trim();
+    if (!raw || completion.choices?.[0]?.finish_reason==="length" || completion.choices?.[0]?.finish_reason==="content_filter" || String(completion.choices?.[0]?.finish_reason)==="error") {
+      const reason=completion.choices?.[0]?.finish_reason;
+      console.warn("AI completion incomplete",{stage,model:vision.model,finishReason:reason,hasContent:Boolean(raw),choiceCount:completion.choices?.length??0,completionTokens:completion.usage?.completion_tokens,reasoningTokens:completion.usage?.completion_tokens_details?.reasoning_tokens});
+      return fail(reason==="length"?"视觉模型输出达到 Token 上限，请重试或换一张清晰图片。":"视觉模型未返回完整答案，请稍后重试。",502);
+    }
     const clean = raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
     let parsed: unknown;
     try { parsed = JSON.parse(clean); } catch { return fail("模型返回格式异常，请重试。",502); }
-    const result = modelResultSchema.safeParse(parsed);
-    if (!result.success) return fail("模型结果不完整，请重新分析或换一张更清晰的课表。",502);
+    const {result,repaired}=parseExtraction(parsed);
+    if (!result.success) {
+      // Log schema codes and fixed structural paths only; no values or provider response.
+      console.warn("AI extraction schema invalid",{model:vision.model,issues:result.error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==="number"?part:["status","kind","confidence","warnings","coverage","courses","day","name","start","end","timeLabel","weeks","count","visibility"].includes(String(part))?part:"other")}))});
+      return fail("视觉模型返回的课表结构无法解析，请重试。",502);
+    }
+    if(repaired)console.info("AI extraction normalized",{model:vision.model});
     if (result.data.status === "unreadable") return fail(result.data.reason,422);
-    return NextResponse.json(result.data,{headers:{"Cache-Control":"no-store"}});
+    let extraction=result.data;
+    if(Math.min(images.width,images.height)<600){
+      if(extraction.confidence==="high")extraction.confidence="medium";
+      extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
+    }
+    // At most one targeted reread. Keep the initial result if it fails or does not improve.
+    if(needsRecheck(extraction)&&deadline-Date.now()>30000&&!request.signal.aborted){
+      const quality=qualityOf(buildTimetable(extraction));
+      const days=quality.reviewDays;
+      if(days.length){
+        try{
+          const second=await visionClient.chat.completions.create({
+            model:vision.model,
+            messages:[{role:"system",content:SCHEDULE_EXTRACTION},{role:"user",content:[
+              ...imageParts,
+              {type:"text",text:"专项复核：仅重新读取以下星期的整列或整行，星期编号 "+days.join("、")+"。其他星期不要添加课程。先沿格线确认实际星期标题及另一轴时段标题，再逐格重新抄写 rawText；不要根据第一次结果补造。同格多条课程和不同周次安排逐条记录。对于确认整格为空且有明确时段标题的格，在对应日期 coverage.emptySlots 中抄写该标题；模糊或缺失的格不得标为空。不要因为相邻日期课程相同就复制或删除。被复核日期的 coverage.count 必须等于实际返回记录数量。"}
+            ]}],
+            ...completionLimit(vision,10000),...providerOptions(vision)
+          },{signal:request.signal,timeout:Math.min(30000,Math.max(1000,deadline-Date.now()-22000))});
+          const answer=second.choices?.[0]?.message?.content;
+          if(answer&&second.choices[0].finish_reason==="stop"){
+            const retry=parseExtraction(JSON.parse(answer.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"")));
+            if(retry.result.success&&retry.result.data.status==="ok"){
+              extraction=mergeRecheck(extraction,retry.result.data,days);
+            }
+          }
+        }catch{console.info("AI targeted reread unavailable");}
+      }
+    }
+    const schedule=buildTimetable(extraction);
+    const facts=scoreTimetable(schedule);
+    stage="文本评价";
+    if(deadline-Date.now()<8000)return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
+    const reviewCompletion=await reviewClient.chat.completions.create({
+      model:reviewConfig.model,
+      messages:[
+        {role:"system",content:SCHEDULE_REVIEW},
+        {role:"user",content:JSON.stringify({facts})},
+      ],
+      ...completionLimit(reviewConfig,6500),
+      ...providerOptions(reviewConfig),
+    },{signal:request.signal,timeout:Math.min(50000,Math.max(1000,deadline-Date.now()))}).catch(()=>null);
+    if(!reviewCompletion)return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
+    const reviewRaw=reviewCompletion.choices?.[0]?.message?.content?.trim();
+    const reason=reviewCompletion.choices?.[0]?.finish_reason;
+    if(!reviewRaw||reason==="length"||reason==="content_filter"||String(reason)==="error"){
+      console.warn("AI completion incomplete",{stage,model:reviewConfig.model,finishReason:reason,hasContent:Boolean(reviewRaw),choiceCount:reviewCompletion.choices?.length??0,completionTokens:reviewCompletion.usage?.completion_tokens,reasoningTokens:reviewCompletion.usage?.completion_tokens_details?.reasoning_tokens});
+      return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});
+    }
+    let reviewJson:unknown;
+    try{reviewJson=JSON.parse(reviewRaw.replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,"").trim());}
+    catch{return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});}
+    const review=reviewResultSchema.safeParse(reviewJson);
+    if(!review.success){console.warn("AI review schema invalid",{model:reviewConfig.model});return NextResponse.json(buildReport(extraction,undefined,schedule),{headers:{"Cache-Control":"no-store"}});}
+    return NextResponse.json(buildReport(extraction,review.data,schedule),{headers:{"Cache-Control":"no-store"}});
   } catch (error) {
-    if (error instanceof OpenAI.APIError && error.status === 429) return fail("AI 服务繁忙或额度不足，请稍后重试。",503);
-    return fail("AI 分析暂时失败，请稍后重试或检查服务配置。",502);
+    if (error instanceof OpenAI.APIError && error.status === 429) return fail(stage+"模型繁忙或免费额度不足，请稍后重试。",503);
+    // Do not log request bodies, provider error messages, keys or course data.
+    console.warn("AI stage failed",{stage,status:error instanceof OpenAI.APIError?error.status:undefined});
+    return fail(stage+"暂时失败，请稍后重试或检查服务配置。",502);
   }
 }
