@@ -72,7 +72,7 @@ export default function RecognitionLab(){
         const read=(name:string)=>{try{const b=content[prefix+name+".json"];return b&&b.length<2_000_000?JSON.parse(strFromU8(b)):null;}catch{return null;}};
         const o=ocrSchema.safeParse(read("ocr"));
         if(o.success){const pair=bundleSchema.safeParse({ocr:o.data,layout:read("layout")});const t=topologySchema.safeParse(read("topology"));job.ocr={...o.data,...(pair.success?{layout:pair.data.layout}:{}),...(t.success?{topology:t.data}:{})};job.ocrReused=true;}
-        for(const m of methods){const raw=read(m),p=result41Schema.safeParse(raw);if(p.success&&p.data.method===m&&p.data.status!=="failed"&&p.data.schedule){
+        for(const m of methods){const raw=read(m),p=result5Schema.safeParse(raw);if(p.success&&p.data.method===m&&p.data.status!=="failed"&&p.data.schedule){
           // Do not reuse 4.1 outputs if importing a round-four package. Historical
           // baseline data is preserved; calls are counted separately from new calls.
           if(m==="V1"||m==="V16"||manifest?.format==="schedule-recognition-lab-v5"){
