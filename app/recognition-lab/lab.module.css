@@ -1,0 +1,28 @@
+
+.main{max-width:1160px;margin:0 auto;padding:30px 20px 80px;line-height:1.6}
+.header{display:flex;gap:18px;align-items:center;font-size:13px;border-bottom:1px solid #8893a044;padding:0 0 16px;margin-bottom:26px}
+.header span{margin-left:auto;letter-spacing:.12em;color:#8291a5;font-size:11px}
+.main h1{font-size:clamp(26px,5vw,40px);font-weight:750;line-height:1.2}
+.sub,.hint{opacity:.72;font-size:13px}
+.panel{border:1px solid #8893a04d;border-radius:14px;margin-top:18px;padding:20px;background:rgba(128,140,160,.045)}
+.panel h2{font-size:17px;margin-bottom:16px;font-weight:650}
+.upload{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px dashed #8893a0;border-radius:10px;font-weight:600}
+.samples{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:6px;margin-top:12px}
+.samples div{display:flex;gap:8px;align-items:center;font-size:12px;min-width:0;padding:6px 8px;background:rgba(130,145,165,.09);border-radius:6px}
+.samples span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.samples small{margin-left:auto;white-space:nowrap;opacity:.7}
+.methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px}
+.methods label{border:1px solid #8893a040;border-radius:8px;padding:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:14px}
+.methods small{font-size:10px;opacity:.7}
+.panel input[type=password]{border:1px solid #8893a080;border-radius:6px;padding:6px 8px;max-width:100%}
+.consent{display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13px}
+.consent input{margin-top:5px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.actions button,.result{border:1px solid #8893a080;border-radius:8px;padding:8px 13px;font-size:13px;cursor:pointer;background:rgba(128,140,160,.09)}
+.actions button:first-child{background:#2563eb;color:#fff;border-color:#2563eb}
+.actions button:disabled{opacity:.4;cursor:not-allowed}
+.panel progress{width:100%;margin-top:18px;height:12px;accent-color:#2563eb}
+.result{min-width:92px;display:flex;flex-direction:column;text-align:left;padding:5px 8px;width:100%}
+.result[data-status=ok]{border-color:#26956c}.result[data-status=partial]{border-color:#c38b36}.result[data-status=failed]{border-color:#bb5353}
+.result small{font-size:10px;opacity:.72;white-space:nowrap}.error{color:#d75b5b}
+.json{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:500px;overflow:auto}

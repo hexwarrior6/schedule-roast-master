@@ -16,7 +16,7 @@ export default function Lab(){
  }
  function save(){if(!result)return;const u=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=u;a.download="ocr-lab.json";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
  return <main style={{maxWidth:1000,margin:"32px auto",padding:"0 18px"}}>
- <a href="/">返回原版课表评价</a><h1>OCR 实验室</h1><p>RapidOCR + ONNX Runtime CPU · 仅测试文字、坐标和真实网格定位，不生成正式评价。</p>
+ <a href="/">返回原版课表评价</a> · <a href="/recognition-lab">批量融合实验台</a><h1>OCR 实验室</h1><p>RapidOCR + ONNX Runtime CPU · 仅测试文字、坐标和真实网格定位，不生成正式评价。</p>
  <p>仅预览环境可用。上传不超过 3 MB 的 PNG、JPEG 或 WebP，图片不发送给大模型，也不持久化。</p>
  <label>访问码（如已配置） <input type="password" value={code} onChange={e=>setCode(e.target.value)}/></label>
  <div style={{margin:"16px 0",display:"flex",flexWrap:"wrap",gap:12}}><input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={e=>{setFile(e.target.files?.[0]??null);setResult(null)}}/><button className="primary-button compact" disabled={busy||!file} onClick={()=>run(false)}>{busy?"识别中…":"开始 OCR"}</button><button className="secondary-button" disabled={busy} onClick={()=>run(true)}>运行内置测试</button></div>
