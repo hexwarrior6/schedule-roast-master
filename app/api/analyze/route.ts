@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { timingSafeEqual } from "node:crypto";
 import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
-import { extractionResultSchema, reviewResultSchema } from "@/lib/schema";
+import { reviewResultSchema } from "@/lib/schema";
+import { parseExtraction } from "@/lib/normalize-extraction";
 import { analyzeCourses } from "@/lib/analyzer";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
@@ -87,8 +88,13 @@ export async function POST(request: Request) {
     const clean = raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
     let parsed: unknown;
     try { parsed = JSON.parse(clean); } catch { return fail("模型返回格式异常，请重试。",502); }
-    const result = extractionResultSchema.safeParse(parsed);
-    if (!result.success) return fail("模型结果不完整，请重新分析或换一张更清晰的课表。",502);
+    const {result,repaired}=parseExtraction(parsed);
+    if (!result.success) {
+      // Log schema codes and fixed structural paths only; no values or provider response.
+      console.warn("AI extraction schema invalid",{model:vision.model,issues:result.error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==="number"?part:["status","kind","confidence","warnings","coverage","courses","day","name","start","end","timeLabel","weeks","count","visibility"].includes(String(part))?part:"other")}))});
+      return fail("视觉模型返回的课表结构无法解析，请重试。",502);
+    }
+    if(repaired)console.info("AI extraction normalized",{model:vision.model});
     if (result.data.status === "unreadable") return fail(result.data.reason,422);
     const extraction=result.data;
     if(Math.min(images.width,images.height)<600){
