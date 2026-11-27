@@ -93,8 +93,34 @@ def local_topology(image,ocr,layout):
 @lru_cache(maxsize=1)
 def table_engine():
     from rapid_table import RapidTable, RapidTableInput, ModelType
-    # No second OCR model or PyTorch. SLANet-plus is shipped in the wheel.
-    return RapidTable(RapidTableInput(model_type=ModelType.SLANETPLUS,use_ocr=False,engine_cfg={"intra_op_num_threads":1,"inter_op_num_threads":1}))
+    # Vercel's deployed application is read-only. Cache only the pinned public
+    # model in /tmp, checking the exact upstream SHA-256 before loading.
+    import hashlib
+    import tempfile
+    from pathlib import Path
+    import requests
+    expected="d57a942af6a2f57d6a4a0372573c696a2379bf5857c45e2ac69993f3b334514b"
+    url="https://www.modelscope.cn/models/RapidAI/RapidTable/resolve/v2.0.0/slanet-plus.onnx"
+    path=Path(tempfile.gettempdir())/("schedule-slanet-plus-"+expected[:12]+".onnx")
+    def valid(p):
+        return p.is_file() and p.stat().st_size<20*1024*1024 and hashlib.sha256(p.read_bytes()).hexdigest()==expected
+    if not valid(path):
+        with tempfile.NamedTemporaryFile(dir=path.parent,delete=False) as tmp:
+            pending=Path(tmp.name)
+            try:
+                with requests.get(url,stream=True,timeout=(8,12)) as response:
+                    response.raise_for_status()
+                    count=0;deadline=time.monotonic()+22
+                    for chunk in response.iter_content(65536):
+                        count+=len(chunk)
+                        if count>20*1024*1024 or time.monotonic()>deadline:raise ValueError("Model download limit")
+                        tmp.write(chunk)
+                tmp.flush()
+                if not valid(pending):raise ValueError("Model checksum mismatch")
+                pending.replace(path)
+            finally:
+                pending.unlink(missing_ok=True)
+    return RapidTable(RapidTableInput(model_type=ModelType.SLANETPLUS,model_dir_or_path=str(path),use_ocr=False,engine_cfg={"intra_op_num_threads":1,"inter_op_num_threads":1}))
 
 def learned_topology(image,ocr,layout):
     start=time.perf_counter();engine=table_engine();loaded=time.perf_counter()
