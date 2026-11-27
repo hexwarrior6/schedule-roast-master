@@ -49,7 +49,11 @@ class handler(BaseHTTPRequestHandler):
                 except (ValueError,TypeError,KeyError):
                     self.respond(400,{"error":"Invalid crop regions"})
                 return
-            self.respond(200,recognize(image))
+            report=recognize(image)
+            if params.get("layout")==["1"]:
+                from ocr_lab.layout import build_layout
+                report["layout"]=build_layout(image,report)
+            self.respond(200,report)
         except Exception as exc:
             print("OCR inference failure:",type(exc).__name__)
             self.respond(500,{"error":"OCR inference failed","type":type(exc).__name__})
