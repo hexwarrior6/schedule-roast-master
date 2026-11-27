@@ -5,6 +5,7 @@ import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
 import { reviewResultSchema } from "@/lib/schema";
 import { parseExtraction } from "@/lib/normalize-extraction";
 import { analyzeCourses } from "@/lib/analyzer";
+import {buildTimetable,summarizeTimetable} from "@/lib/timetable";
 import { buildReport } from "@/lib/report";
 import { prepareVisionImages } from "@/lib/vision";
 import { resolveAIConfig, completionLimit, providerOptions } from "@/lib/ai-config";
@@ -101,12 +102,14 @@ export async function POST(request: Request) {
       if(extraction.confidence==="high")extraction.confidence="medium";
       extraction.warnings=["原图分辨率较低，局部放大不能恢复缺失的文字细节，请核对课程名称和节次。",...extraction.warnings].slice(0,8);
     }
+    const schedule=buildTimetable(extraction);
+    const facts=summarizeTimetable(schedule);
     stage="文本评价";
     const reviewCompletion=await reviewClient.chat.completions.create({
       model:reviewConfig.model,
       messages:[
         {role:"system",content:SCHEDULE_REVIEW},
-        {role:"user",content:JSON.stringify({extraction,stats:analyzeCourses(extraction.courses)})},
+        {role:"user",content:JSON.stringify({schedule,facts,stats:analyzeCourses(extraction.courses)})},
       ],
       ...completionLimit(reviewConfig,6500),
       ...providerOptions(reviewConfig),
@@ -122,7 +125,7 @@ export async function POST(request: Request) {
     catch{return fail("评价格式异常，请重试。",502);}
     const review=reviewResultSchema.safeParse(reviewJson);
     if(!review.success)return fail("模型评价不完整，请重试。",502);
-    return NextResponse.json(buildReport(extraction,review.data),{headers:{"Cache-Control":"no-store"}});
+    return NextResponse.json(buildReport(extraction,review.data,schedule),{headers:{"Cache-Control":"no-store"}});
   } catch (error) {
     if (error instanceof OpenAI.APIError && error.status === 429) return fail(stage+"模型繁忙或免费额度不足，请稍后重试。",503);
     // Do not log request bodies, provider error messages, keys or course data.

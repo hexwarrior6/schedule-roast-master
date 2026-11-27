@@ -28,9 +28,27 @@ export const coverageSchema = z.array(z.object({
   count: z.number().int().min(0).max(150),
 })).length(7).refine(rows => new Set(rows.map(row => row.day)).size === 7);
 export const scheduleKindSchema = z.enum(["personal","catalog","uncertain"]);
+const termWeeksSchema=z.number().int().min(1).max(60).nullable();
+const unscheduledSchema=z.array(z.object({name:z.string().min(1).max(100),weeks:z.string().max(120).nullable()})).max(50);
+export const canonicalScheduleSchema=z.object({
+  version:z.literal(1),
+  kind:scheduleKindSchema,
+  termWeeks:termWeeksSchema,
+  coverage:coverageSchema,
+  courses:z.array(courseSchema.and(z.object({
+    id:z.string(),
+    periodStart:z.number().int().min(1).max(30).nullable(),
+    periodEnd:z.number().int().min(1).max(30).nullable(),
+    weekNumbers:z.array(z.number().int().min(1).max(60)).max(60).nullable(),
+  }))).min(1).max(150),
+  unscheduled:unscheduledSchema,
+});
+export type CanonicalSchedule=z.infer<typeof canonicalScheduleSchema>;
 export const extractionSchema = z.object({
   status: z.literal("ok"),
   kind: scheduleKindSchema,
+  termWeeks:termWeeksSchema.optional(),
+  unscheduled:unscheduledSchema.optional(),
   confidence: z.enum(["high","medium","low"]),
   warnings: z.array(z.string().max(200)).max(8),
   coverage: coverageSchema,
@@ -57,6 +75,7 @@ export const reportSchema = z.object({
   confidence: z.enum(["high", "medium", "low"]),
   kind: scheduleKindSchema.optional(),
   coverage: coverageSchema.optional(),
+  schedule:canonicalScheduleSchema.optional(),
   warnings: z.array(z.string().max(200)).max(8),
   courses: z.array(courseSchema).min(1).max(150),
   reviews: z.array(z.object({

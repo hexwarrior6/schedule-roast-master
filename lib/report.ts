@@ -1,12 +1,13 @@
 import { analyzeCourses } from "./analyzer";
-import { dimensions, type Extraction, type Report, type ReviewResult } from "./schema";
+import { dimensions, type Extraction, type Report, type ReviewResult, type CanonicalSchedule } from "./schema";
+import {buildTimetable,parseWeekNumbers} from "./timetable";
 
-export function buildReport(extraction: Extraction, review?: ReviewResult): Report {
+export function buildReport(extraction: Extraction, review?: ReviewResult, schedule:CanonicalSchedule=buildTimetable(extraction)): Report {
   const {kind,coverage,courses}=extraction;
   const stats=analyzeCourses(courses);
   const warnings=[...extraction.warnings];
   const confidence=coverage.some(d=>d.visibility==="uncertain")&&extraction.confidence==="high"?"medium":extraction.confidence;
-  const base={status:"ok" as const,kind,coverage,courses,confidence,warnings};
+  const base={status:"ok" as const,kind,coverage,courses,confidence,warnings,schedule};
   if(kind!=="personal") warnings.unshift("图片可能包含候选或重叠课程。以下仅按可见排课进行假设性趣味评价，不代表实际选课负担。");
   if(!review){
     const reason=kind==="catalog"?"图片看起来是课程汇总或备选课程列表，不能确认哪些课程属于同一名学生。": "无法确认所有课程块是否属于同一名学生的个人排课。";
@@ -14,7 +15,7 @@ export function buildReport(extraction: Extraction, review?: ReviewResult): Repo
   }
   const reviews=review.reviews.map(item=>{
     if(item.key==="early"&&stats.timedCount<stats.visibleCount)return {...item,score:null,comment:"图中缺少部分或全部课程的准确钟表时间，不能确定早八次数。"};
-    if(item.key==="weeks"&&courses.some(c=>!c.weeks))return {...item,score:null,comment:"部分课程周次不清晰，无法完整判断单双周及周次安排。"};
+    if(item.key==="weeks"&&courses.some(c=>!parseWeekNumbers(c.weeks,schedule.termWeeks)))return {...item,score:null,comment:"部分课程周次不清晰，无法完整判断单双周及周次安排。"};
     return item;
   });
   const scores=reviews.filter(r=>r.key!=="happiness"&&r.score!==null).map(r=>r.score as number);

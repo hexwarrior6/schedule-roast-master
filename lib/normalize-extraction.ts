@@ -1,4 +1,5 @@
 import { extractionResultSchema, type Course } from "./schema";
+import {cleanCourseFields} from "./timetable";
 
 const object=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const unknownText=/^(?:未知|不详|不明确|无法辨认|无|unknown|null|n\/a|—|-)$/i;
@@ -33,7 +34,9 @@ export function normalizeExtraction(input:unknown):unknown {
   if(root.status!==undefined&&root.status!=="ok")return input;
   // Enforce size limits before processing; do not silently truncate courses.
   if(root.courses.length>150)return input;
-  let incomplete=false,unplaced=0,duplicates=0;
+  const termText=String(root.termWeeks??"").trim().match(/^(\d{1,2})(?:周)?$/);
+  const termWeeks=termText&&Number(termText[1])>=1&&Number(termText[1])<=60?Number(termText[1]):null;
+  let incomplete=false,unplaced=0,duplicates=0,cleaned=0;
   const warnings=Array.isArray(root.warnings)?root.warnings.map(w=>optionalText(w,200)).filter((w):w is string=>w!==null):[];
   const courses:Course[]=[];
   const keys=new Set<string>();
@@ -41,12 +44,15 @@ export function normalizeExtraction(input:unknown):unknown {
     const row=object(entry);
     const day=dayNumber(row?.day);
     if(!row||day===null){unplaced++;incomplete=true;continue;}
-    const name=optionalText(row.name,100);
+    const fields=cleanCourseFields(row,termWeeks);
+    if(fields.embedded)cleaned++;
+    if(fields.incomplete)incomplete=true;
+    const name=optionalText(fields.name,100);
     let start=clock(row.start),end=clock(row.end);
     if(start&&end&&start>=end){start=null;end=null;incomplete=true;}
     if((optionalText(row.start,80)&&!start)||(optionalText(row.end,80)&&!end))incomplete=true;
     if(!name)incomplete=true;
-    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(row.timeLabel,80),weeks:optionalText(row.weeks,120)};
+    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(fields.timeLabel,80),weeks:optionalText(fields.weeks,120)};
     const key=JSON.stringify(course);
     // Unreadable names may describe separate blocks. Keep them distinguishable only
     // when the model provided distinct time/period/week data; otherwise flag uncertainty.
@@ -54,6 +60,7 @@ export function normalizeExtraction(input:unknown):unknown {
     keys.add(key);courses.push(course);
   }
   if(!courses.length)return input;
+  if(cleaned)warnings.unshift("已从 "+cleaned+" 条完整课程文本中分离课程名、节次与周次。");
   if(unplaced)warnings.unshift("有 "+unplaced+" 条记录缺少可确认的星期，未纳入统计；识别可能不完整。");
   if(duplicates)warnings.unshift("已去除 "+duplicates+" 条完全重复的识别记录，可能存在重叠或重复识别。");
   const rows=Array.isArray(root.coverage)?root.coverage.map(object).filter((r):r is Record<string,unknown>=>r!==null):[];
@@ -74,11 +81,12 @@ export function normalizeExtraction(input:unknown):unknown {
   if(incomplete)warnings.unshift("部分识别字段不完整，以下结果仅为可确认记录，请核对原图。");
   const kind=root.kind==="personal"||root.kind==="catalog"?root.kind:"uncertain";
   const confidence=incomplete?"low":root.confidence==="high"||root.confidence==="medium"||root.confidence==="low"?root.confidence:"medium";
-  return {status:"ok",kind,confidence,warnings:warnings.slice(0,8),coverage,courses};
+  const unscheduled=Array.isArray(root.unscheduled)?root.unscheduled.slice(0,50).flatMap(entry=>{const row=object(entry);if(!row)return [];const name=optionalText(cleanCourseFields(row,termWeeks).name,100);return name?[{name,weeks:optionalText(row.weeks,120)}]:[];}):[];
+  return {status:"ok",kind,confidence,termWeeks,unscheduled,warnings:warnings.slice(0,8),coverage,courses};
 }
 export function parseExtraction(input:unknown){
   const direct=extractionResultSchema.safeParse(input);
-  if(direct.success)return {result:direct,repaired:false};
+  if(direct.success&&direct.data.status==="unreadable")return {result:direct,repaired:false};
   const result=extractionResultSchema.safeParse(normalizeExtraction(input));
-  return {result,repaired:result.success};
+  return {result,repaired:result.success&&(!direct.success||JSON.stringify(result.data)!==JSON.stringify(direct.data))};
 }
