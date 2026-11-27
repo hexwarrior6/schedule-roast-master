@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 class handler(BaseHTTPRequestHandler):
     def respond(self,status,obj):
@@ -36,10 +37,18 @@ class handler(BaseHTTPRequestHandler):
         if not 0<n<=3*1024*1024:
             self.respond(413,{"error":"Upload PNG, JPEG or WebP up to 3 MB"});return
         try:
-            from ocr_lab.engine import decode,recognize
+            from ocr_lab.engine import decode,recognize,refine_regions
             try:image=decode(self.rfile.read(n))
             except (ValueError,OSError):
                 self.respond(400,{"error":"Invalid or oversized image"});return
+            params=parse_qs(urlparse(self.path).query)
+            if "regions" in params:
+                try:
+                    regions=json.loads(params["regions"][0])
+                    self.respond(200,refine_regions(image,regions))
+                except (ValueError,TypeError,KeyError):
+                    self.respond(400,{"error":"Invalid crop regions"})
+                return
             self.respond(200,recognize(image))
         except Exception as exc:
             print("OCR inference failure:",type(exc).__name__)

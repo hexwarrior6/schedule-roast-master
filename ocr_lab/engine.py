@@ -146,3 +146,33 @@ def smoke():
     return {"ok":matched==len(expected) and len(observed)==len(expected),"expected":expected,"observed":observed,"matched":matched,
             "expectedCount":len(expected),"observedCount":len(observed),"loadMs":report["loadMs"],"ocrMs":report["ocrMs"],
             "totalMs":report["totalMs"],"warm":report["warm"],"grid":report["grid"]["status"],"engine":report["engine"]}
+
+
+def refine_regions(image, regions):
+    """Re-run OCR on at most four selected cells, using normalized image coordinates."""
+    if not isinstance(regions,list) or not 1<=len(regions)<=4:
+        raise ValueError("Invalid region count")
+    h,w=image.shape[:2]
+    started=time.perf_counter()
+    out=[]
+    for region in regions:
+        ident=region["id"]
+        if not isinstance(ident,str) or not re.fullmatch(r"C\d{1,3}",ident):
+            raise ValueError("Invalid cell id")
+        rect=region["bounds"]
+        if not isinstance(rect,list) or len(rect)!=4 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in rect):
+            raise ValueError("Invalid bounds")
+        x,y,r,b=map(round,rect)
+        if not (0<=x<r<=w and 0<=y<b<=h and r-x>=8 and b-y>=8):
+            raise ValueError("Out-of-bounds crop")
+        crop=image[y:b,x:r].copy()
+        # Upscale small text, preserving aspect ratio; no interpolation across cells.
+        scale=min(2.0,1600/max(crop.shape[:2]))
+        if scale>1:crop=cv2.resize(crop,None,fx=scale,fy=scale,interpolation=cv2.INTER_CUBIC)
+        with LOCK: result=get_engine()(crop)
+        text=""
+        if result.boxes is not None and result.txts is not None:
+            ordered=sorted(zip(result.boxes,result.txts),key=lambda p:(float(np.asarray(p[0])[:,1].mean()),float(np.asarray(p[0])[:,0].mean())))
+            text="\n".join(str(t) for _,t in ordered)[:16000]
+        out.append({"id":ident,"text":text})
+    return {"cells":out,"totalMs":round((time.perf_counter()-started)*1000)}
