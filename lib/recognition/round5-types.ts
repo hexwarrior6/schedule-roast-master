@@ -1,0 +1,16 @@
+import {z} from "zod";
+import {resultSchema} from "./types";
+import type {OCR as BaseOCR} from "./round4-types";
+export const methods=["V1","V16","V18","V19","V20","V21"] as const;
+export type Method=typeof methods[number];
+export const methodNames:Record<Method,string>={V1:"原版上下文",V16:"原版联合识别",V18:"局部边界拓扑",V19:"RapidTable 专用结构",V20:"双结构融合",V21:"保守证据校验"};
+export const result5Schema=resultSchema.extend({method:z.enum(methods),dependencies:z.array(z.enum(methods))});
+export type Result=z.infer<typeof result5Schema>;
+export type Inputs=Partial<Record<Method,Result>>;
+const rect=z.tuple([z.number(),z.number(),z.number(),z.number()]);
+const cell=z.object({id:z.string().max(20),bounds:rect,day:z.number().int().min(1).max(7).nullable(),periods:z.array(z.number().int().min(1).max(30)).max(30),logical:rect.nullable(),source:z.string().max(80),quality:z.number().nullable(),lineIds:z.array(z.number().int().nonnegative()).max(1600),text:z.string().max(16000)});
+const source=z.object({status:z.enum(["ok","unresolved","failed"]),source:z.string(),cells:z.array(cell).max(300),ticks:z.array(z.object({period:z.number().int().min(1).max(30),position:z.number(),lineId:z.number().int().nonnegative()})).max(30),elapsedMs:z.number().nonnegative(),loadMs:z.number().optional(),error:z.string().optional(),unassignedLineIds:z.array(z.number().int().nonnegative()).optional(),boundaries:z.unknown().optional()});
+export const topologySchema=z.object({geometry:source,learned:source});
+export type Topology=z.infer<typeof topologySchema>;
+export type Cell=z.infer<typeof cell>;
+export type OCR=BaseOCR&{topology?:Topology};
