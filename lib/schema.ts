@@ -16,6 +16,8 @@ const clock = z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).nullable();
 export const courseSchema = z.object({
   name: z.string().min(1).max(100),
   rawText: z.string().max(300).nullable().optional(),
+  sourceDayLabel:z.string().max(24).nullable().optional(),
+  sourceSlotLabel:z.string().max(64).nullable().optional(),
   day: z.number().int().min(1).max(7),
   start: clock,
   end: clock,
@@ -27,6 +29,7 @@ export const coverageSchema = z.array(z.object({
   day: z.number().int().min(1).max(7),
   visibility: z.enum(["shown","not_shown","uncertain"]),
   count: z.number().int().min(0).max(150),
+  emptySlots:z.array(z.string().min(1).max(64)).max(30).optional(),
 })).length(7).refine(rows => new Set(rows.map(row => row.day)).size === 7);
 export const scheduleKindSchema = z.enum(["personal","catalog","uncertain"]);
 const termWeeksSchema=z.number().int().min(1).max(60).nullable();

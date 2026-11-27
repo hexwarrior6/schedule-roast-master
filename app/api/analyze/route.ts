@@ -107,14 +107,15 @@ export async function POST(request: Request) {
     }
     // At most one targeted reread. Keep the initial result if it fails or does not improve.
     if(needsRecheck(extraction)&&deadline-Date.now()>30000&&!request.signal.aborted){
-      const days=qualityOf(buildTimetable(extraction)).reviewDays;
+      const quality=qualityOf(buildTimetable(extraction));
+      const days=quality.reviewDays;
       if(days.length){
         try{
           const second=await visionClient.chat.completions.create({
             model:vision.model,
             messages:[{role:"system",content:SCHEDULE_EXTRACTION},{role:"user",content:[
               ...imageParts,
-              {type:"text",text:"专项复核：仅重新读取以下星期的整列或整行，星期编号 "+days.join("、")+"。其他星期不要添加课程。重新从图中逐字抄写 rawText，必须保留原始节次和周次，扫描遗漏的同格多条安排；不要根据第一次结果补造。被复核日期的 coverage.count 必须等于实际返回记录数量。"}
+              {type:"text",text:"专项复核：仅重新读取以下星期的整列或整行，星期编号 "+days.join("、")+"。其他星期不要添加课程。先沿格线确认实际星期标题及另一轴时段标题，再逐格重新抄写 rawText；不要根据第一次结果补造。同格多条课程和不同周次安排逐条记录。对于确认整格为空且有明确时段标题的格，在对应日期 coverage.emptySlots 中抄写该标题；模糊或缺失的格不得标为空。不要因为相邻日期课程相同就复制或删除。被复核日期的 coverage.count 必须等于实际返回记录数量。"}
             ]}],
             ...completionLimit(vision,10000),...providerOptions(vision)
           },{signal:request.signal,timeout:Math.min(30000,Math.max(1000,deadline-Date.now()-22000))});

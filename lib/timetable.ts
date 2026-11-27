@@ -65,7 +65,10 @@ export function cleanCourseFields(row:Record<string,unknown>,termWeeks:number|nu
   const misplacedPeriod=parsePeriods(weeks);
   if(misplacedPeriod){
     if(!embedded){
-      timeLabel="第"+misplacedPeriod[0]+(misplacedPeriod[0]===misplacedPeriod[1]?"":"-"+misplacedPeriod[1])+"节";
+      const existing=parsePeriods(timeLabel);
+      // Without source evidence, conflicting numeric periods are ambiguous.
+      timeLabel=existing&&(existing[0]!==misplacedPeriod[0]||existing[1]!==misplacedPeriod[1])?null:
+        "第"+misplacedPeriod[0]+(misplacedPeriod[0]===misplacedPeriod[1]?"":"-"+misplacedPeriod[1])+"节";
     }
     weeks=null;incomplete=true;
   }

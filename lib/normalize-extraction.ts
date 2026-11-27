@@ -1,5 +1,6 @@
 import { extractionResultSchema, type Course } from "./schema";
 import {cleanCourseFields} from "./timetable";
+import {weekdayHeader,slotKey} from "./placement";
 
 const object=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const unknownText=/^(?:未知|不详|不明确|无法辨认|无|unknown|null|n\/a|—|-)$/i;
@@ -39,6 +40,7 @@ export function normalizeExtraction(input:unknown):unknown {
   let incomplete=false,unplaced=0,duplicates=0,cleaned=0;
   const warnings=Array.isArray(root.warnings)?root.warnings.map(w=>optionalText(w,200)).filter((w):w is string=>w!==null):[];
   const courses:Course[]=[];
+  const placementMismatch=new Set<number>();
   const keys=new Set<string>();
   for(const entry of root.courses){
     const row=object(entry);
@@ -52,7 +54,10 @@ export function normalizeExtraction(input:unknown):unknown {
     if(start&&end&&start>=end){start=null;end=null;incomplete=true;}
     if((optionalText(row.start,80)&&!start)||(optionalText(row.end,80)&&!end))incomplete=true;
     if(!name)incomplete=true;
-    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(fields.timeLabel,80),weeks:optionalText(fields.weeks,120),rawText:fields.rawText};
+    const sourceDay=weekdayHeader(row.sourceDayLabel);
+    if(sourceDay!==null&&sourceDay!==day){placementMismatch.add(day);placementMismatch.add(sourceDay);incomplete=true;}
+    const course={name:name??"课程名称不清晰",day,start,end,timeLabel:optionalText(fields.timeLabel,80),weeks:optionalText(fields.weeks,120),rawText:fields.rawText,
+      sourceDayLabel:sourceDay!==null?optionalText(row.sourceDayLabel,24):null,sourceSlotLabel:slotKey(row.sourceSlotLabel)};
     const key=JSON.stringify([course.day,course.name,course.start,course.end,course.timeLabel,course.weeks]);
     // Unreadable names may describe separate blocks. Keep them distinguishable only
     // when the model provided distinct time/period/week data; otherwise flag uncertainty.
@@ -70,13 +75,16 @@ export function normalizeExtraction(input:unknown):unknown {
     const matches=rows.filter(r=>dayNumber(r.day)===day);
     const row=matches[0];
     const visibility=row?.visibility;
+    const emptySlots=Array.isArray(row?.emptySlots)?[...new Set(row.emptySlots.map(slotKey).filter((v):v is string=>v!==null))].slice(0,30):[];
+    const contradictsEmpty=courses.some(c=>c.day===day&&c.sourceSlotLabel&&emptySlots.includes(c.sourceSlotLabel));
     const reported=typeof row?.count==="number"?row.count:typeof row?.count==="string"&&/^\d+$/.test(row.count.trim())?Number(row.count):null;
-    if(matches.length!==1||reported!==count||(visibility!=="shown"&&visibility!=="not_shown"&&visibility!=="uncertain")||(visibility==="not_shown"&&count>0)){
+    if(placementMismatch.has(day)||contradictsEmpty||matches.length!==1||reported!==count||(visibility!=="shown"&&visibility!=="not_shown"&&visibility!=="uncertain")||(visibility==="not_shown"&&count>0)){
       mismatch=true;
       return {day,count,visibility:"uncertain" as const};
     }
-    return {day,count,visibility};
+    return {day,count,visibility,...(emptySlots.length?{emptySlots}:{})};
   });
+  if(placementMismatch.size)warnings.unshift("部分排课记录的星期字段与图片星期标题不一致，已标记待核对；未自动移动课程。");
   if(mismatch){incomplete=true;warnings.unshift("模型逐日覆盖范围或计数不一致，已按可确认课程明细重新统计；不确定日期不视为无课。");}
   if(incomplete)warnings.unshift("部分识别字段不完整，以下结果仅为可确认记录，请核对原图。");
   const kind=root.kind==="personal"||root.kind==="catalog"?root.kind:"uncertain";

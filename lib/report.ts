@@ -1,6 +1,7 @@
 import { dimensions, type Extraction, type Report, type ReviewResult, type CanonicalSchedule } from "./schema";
 import {buildTimetable} from "./timetable";
 import {scoreTimetable} from "./score";
+import {crossDayMatches} from "./quality";
 
 // Model output supplies figurative wording only. Numerical claims and schedule
 // facts always come from code. Reject common factual claims in decorative copy.
@@ -23,6 +24,8 @@ export function buildReport(extraction: Extraction, review?: ReviewResult, sched
   const {kind,coverage,courses}=extraction;
   const rules=scoreTimetable(schedule);
   const warnings=[...extraction.warnings];
+  const sameDays=crossDayMatches(schedule);
+  if(sameDays.length)warnings.unshift("发现 "+sameDays.length+" 组不同日期的相同排课安排（可能是正常重复上课）；请核对原图星期定位，未仅凭相同内容删除。");
   const confidence=coverage.some(d=>d.visibility==="uncertain")&&extraction.confidence==="high"?"medium":extraction.confidence;
   if(kind!=="personal")warnings.unshift("图片可能包含候选或重叠课程。以下仅按可见排课进行假设性趣味评价，不代表实际选课负担。");
   if(!review)warnings.push("评价模型未返回有效文案，已使用规则统计及本地趣味文案。");
