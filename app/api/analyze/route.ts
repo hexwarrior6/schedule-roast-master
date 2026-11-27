@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { timingSafeEqual } from "node:crypto";
-import { SCHEDULE_GENERAL_ANALYSIS } from "@/lib/prompts";
-import { modelResultSchema } from "@/lib/schema";
+import { SCHEDULE_EXTRACTION, SCHEDULE_REVIEW } from "@/lib/prompts";
+import { extractionResultSchema, reviewResultSchema } from "@/lib/schema";
+import { analyzeCourses } from "@/lib/analyzer";
+import { buildReport } from "@/lib/report";
 import { detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const fail = (message:string,status:number) => NextResponse.json({error:message},{status,headers:{"Cache-Control":"no-store"}});
 function checkCode(provided: string, expected: string) {
@@ -61,10 +63,10 @@ export async function POST(request: Request) {
     const completion = await client.chat.completions.create({
       model: process.env.AI_MODEL,
       messages: [
-        {role:"system",content:SCHEDULE_GENERAL_ANALYSIS},
+        {role:"system",content:SCHEDULE_EXTRACTION},
         {role:"user",content:[
-          {type:"text",text:"识别这张大学课表并生成评价，按照指定 JSON 格式返回。"},
-          {type:"image_url",image_url:{url:"data:"+mime+";base64,"+Buffer.from(bytes).toString("base64")}},
+          {type:"text",text:"仅逐日识别图片中所有可见课程块，核对每个星期，暂不评价。"},
+          {type:"image_url",image_url:{url:"data:"+mime+";base64,"+Buffer.from(bytes).toString("base64"),detail:"high"}},
         ]},
       ],
       max_tokens: 6500,
@@ -74,10 +76,29 @@ export async function POST(request: Request) {
     const clean = raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
     let parsed: unknown;
     try { parsed = JSON.parse(clean); } catch { return fail("模型返回格式异常，请重试。",502); }
-    const result = modelResultSchema.safeParse(parsed);
+    const result = extractionResultSchema.safeParse(parsed);
     if (!result.success) return fail("模型结果不完整，请重新分析或换一张更清晰的课表。",502);
     if (result.data.status === "unreadable") return fail(result.data.reason,422);
-    return NextResponse.json(result.data,{headers:{"Cache-Control":"no-store"}});
+    const extraction=result.data;
+    if(extraction.kind!=="personal"){
+      return NextResponse.json(buildReport(extraction),{headers:{"Cache-Control":"no-store"}});
+    }
+    const reviewCompletion=await client.chat.completions.create({
+      model:process.env.AI_MODEL,
+      messages:[
+        {role:"system",content:SCHEDULE_REVIEW},
+        {role:"user",content:JSON.stringify({extraction,stats:analyzeCourses(extraction.courses)})},
+      ],
+      max_tokens:3500,
+    },{signal:request.signal});
+    const reviewRaw=reviewCompletion.choices[0]?.message?.content?.trim();
+    if(!reviewRaw)return fail("课表已识别，但模型没有生成评价，请重试。",502);
+    let reviewJson:unknown;
+    try{reviewJson=JSON.parse(reviewRaw.replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/,"").trim());}
+    catch{return fail("评价格式异常，请重试。",502);}
+    const review=reviewResultSchema.safeParse(reviewJson);
+    if(!review.success)return fail("模型评价不完整，请重试。",502);
+    return NextResponse.json(buildReport(extraction,review.data),{headers:{"Cache-Control":"no-store"}});
   } catch (error) {
     if (error instanceof OpenAI.APIError && error.status === 429) return fail("AI 服务繁忙或额度不足，请稍后重试。",503);
     return fail("AI 分析暂时失败，请稍后重试或检查服务配置。",502);
