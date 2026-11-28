@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { strToU8, strFromU8, unzipSync, zipSync } from "fflate";
-import { prepareImage, detectedImageType, MAX_IMAGE_BYTES } from "@/lib/image";
+import { strToU8, unzipSync, zipSync } from "fflate";
+import { prepareImage, detectedImageType } from "@/lib/image";
 import { ocrSchema } from "@/lib/recognition/types";
 import { bundleSchema } from "@/lib/recognition/round4-types";
 import { topologySchema } from "@/lib/recognition/round5-types";
