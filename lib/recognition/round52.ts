@@ -52,17 +52,11 @@ function excerpt(rawText: string | null) {
   const p = rawText.match(/[/／]\s*[（(]\s*((?:第)?[一二三四五六七八九十\d]{1,2}(?:\s*[-–—~～至]\s*(?:第)?[一二三四五六七八九十\d]{1,2})?节)\s*[）)]/u);
   if (!p || p.index === undefined) return { name, period: null, weeks: null };
   const after = rawText.slice(p.index + p[0].length).split(/[\/／]/, 1)[0].trim();
-  const normalized = typeof repairWeek(after) === "string" ? repairWeek(after) as string : after;
-  return { name, period: canonicalPeriod(p[1]) ?? p[1], weeks: normalized || null };
+  const fixed = repairWeek(after);
+  return { name, period: canonicalPeriod(p[1]) ?? p[1], weeks: (typeof fixed === "string" ? fixed : after) || null };
 }
 
-/**
- * B1: lossless normalization.
- * - Structured fields win over rawText; rawText is only a fallback.
- * - Keep class suffixes, malformed-but-useful labels and duplicate rows.
- * - Never infer a missing day or turn a period into a week.
- * - Keep invalid week strings visible while weekNumbers remains null.
- */
+/** B1: preserve explicit fields, source text, class suffixes and duplicate rows. */
 export function normalizeLosslessV2(input: unknown) {
   const root = object(input);
   const repairs: Repair[] = [];
@@ -172,11 +166,7 @@ export function normalizeLosslessV2(input: unknown) {
     const visibility = old && ["shown", "not_shown", "uncertain"].includes(String(old.visibility))
       ? old.visibility as "shown" | "not_shown" | "uncertain"
       : "uncertain";
-    return {
-      day,
-      count,
-      visibility: visibility === "not_shown" && count > 0 ? "uncertain" as const : visibility,
-    };
+    return { day, count, visibility: visibility === "not_shown" && count > 0 ? "uncertain" as const : visibility };
   });
 
   const unscheduled = (Array.isArray(root.unscheduled) ? root.unscheduled : []).slice(0, 50).flatMap((x) => {
@@ -202,7 +192,7 @@ function normalizeWeekEvidence(value: string, termWeeks: number | null) {
 }
 
 function evidencePeriod(value: string) {
-  const m = value.match(/(?:第)?[一二三四五六七八九十\d]{1,2}(?:\s*[-–—~～至]\s*(?:第)?[一二三四五六七八九十\d]{1,2})?节/u);
+  const m = value.normalize("NFKC").match(/(?:第)?[一二三四五六七八九十\d]{1,2}(?:\s*[-–—~～至]\s*(?:第)?[一二三四五六七八九十\d]{1,2})?节/u);
   if (!m) return null;
   const canonical = canonicalPeriod(m[0]) ?? m[0];
   return parsePeriods(canonical) ? canonical : null;
@@ -210,13 +200,12 @@ function evidencePeriod(value: string) {
 
 function evidenceWeeks(value: string, periodIndex: number | null) {
   let tail = periodIndex == null ? value : value.slice(periodIndex);
-  tail = tail.replace(/^[\s\S]*?节/u, "").split(/[\/／\n\r]/, 1)[0].trim();
+  tail = tail.replace(/^[\s\S]*?节/u, "").replace(/^[)）\]】\s]+/u, "").split(/[\/／\n\r]/, 1)[0].trim();
   const fixed = normalizeWeekEvidence(tail, null);
   if (fixed) return fixed;
   const match = tail.match(/((?:第)?\d{1,2}(?:\s*[-–—~～至]\s*\d{1,2})?周?(?:\s*\((?:单|双)(?:数)?周?\))?(?:[,，、;；]\s*(?:第)?\d{1,2}(?:\s*[-–—~～至]\s*\d{1,2})?周?(?:\s*\((?:单|双)(?:数)?周?\))?)*)/u);
   if (!match) return null;
-  const candidate = match[1].replace(/\s/g, "");
-  return normalizeWeekEvidence(candidate, null);
+  return normalizeWeekEvidence(match[1].replace(/\s/g, ""), null);
 }
 
 type EvidenceCell = { day: number; text: string; id: string; source: string; quality: number };
@@ -240,10 +229,7 @@ function evidenceCells(ocr: OCR, layout: Layout | null): EvidenceCell[] {
   return out;
 }
 
-/**
- * B2: only fill missing week/period fields from a unique same-day OCR cell.
- * Existing non-empty values are never overwritten. Conflicts are reported.
- */
+/** B2: only fill missing week/period fields from a unique same-day OCR cell. */
 export function validateFieldEvidenceV2(base: CanonicalSchedule | null, ocr: OCR | null, layout: Layout | null) {
   const changes: unknown[] = [];
   const conflicts: unknown[] = [];
@@ -269,9 +255,10 @@ export function validateFieldEvidenceV2(base: CanonicalSchedule | null, ocr: OCR
     }
 
     const cell = matches[0];
+    const normalizedCellText = cell.text.normalize("NFKC");
+    const periodMatch = normalizedCellText.match(/(?:第)?[一二三四五六七八九十\d]{1,2}(?:\s*[-–—~～至]\s*(?:第)?[一二三四五六七八九十\d]{1,2})?节/u);
     const period = evidencePeriod(cell.text);
-    const pIndex = period ? cell.text.normalize("NFKC").indexOf(period) : null;
-    const weeks = evidenceWeeks(cell.text, pIndex);
+    const weeks = evidenceWeeks(cell.text, periodMatch?.index ?? null);
     const next = { ...course };
     let changed = false;
 
